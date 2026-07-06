@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Electron build/packaging output
+dist/
+release/
+out/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Claude Code local config/tooling (not part of the app)
+.claude/
+
+# Env files
+.env
+.env.local

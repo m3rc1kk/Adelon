@@ -1,0 +1,16 @@
+{
+  "name": "adelon",
+  "version": "1.0.0",
+  "description": "Adelon — трекер выполнения лаб, практик и проектов по предметам семестра",
+  "main": "main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build:icon": "node scripts/gen-icon.js"
+  },
+  "devDependencies": {
+    "electron": "^43.0.0"
+  }
+}

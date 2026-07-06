@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self';" />
+  <title>Adelon</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Golos+Text:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="theme-boot.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Splash paints instantly on first frame (inline-styled, no external CSS needed),
+       app.js fades it out once the interface is rendered. -->
+  <div id="splash">
+    <div class="splash-inner">
+      <div class="splash-logo">А</div>
+      <div class="splash-word">Adelon</div>
+      <div class="splash-tag">Твои лабы, практики и проекты — под контролем</div>
+      <div class="splash-bar"><span></span></div>
+    </div>
+  </div>
+  <div id="root"></div>
+  <script src="app.js"></script>
+</body>
+</html>
