@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const { version } = require('./package.json');
+
+let appVersion = '';
+try { appVersion = ipcRenderer.sendSync('app:version'); } catch (_) {}
 
 contextBridge.exposeInMainWorld('adelon', {
-  version,
+  version: appVersion,
   load: () => ipcRenderer.invoke('data:load'),
   save: (data) => ipcRenderer.invoke('data:save', data),
   ogu: {

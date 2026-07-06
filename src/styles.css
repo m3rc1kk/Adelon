@@ -152,3 +152,14 @@ body{transition:background-color .25s ease;}
 .release-notes a{color:var(--accent-2);}
 .release-notes blockquote{margin:0;padding-left:12px;border-left:2px solid var(--border-strong);color:var(--text-3);}
 .release-notes hr{border:none;border-top:1px solid var(--border);}
+
+.confetti-layer{position:fixed;inset:0;z-index:9998;pointer-events:none;overflow:hidden;}
+.confetti-piece{position:fixed;top:0;left:0;will-change:transform,opacity;opacity:0;}
+@media (prefers-reduced-motion: no-preference){
+  .confetti-piece{animation:confetti-fly 1.25s cubic-bezier(.15,.6,.35,1) forwards;}
+}
+@keyframes confetti-fly{
+  0%{transform:translate(-50%,-50%) rotate(0deg) scale(1);opacity:0;}
+  12%{opacity:1;}
+  100%{transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) rotate(var(--rot)) scale(.5);opacity:0;}
+}

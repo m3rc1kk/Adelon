@@ -106,6 +106,8 @@ function setupAutoUpdate() {
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
+ipcMain.on('app:version', (e) => { e.returnValue = app.getVersion(); });
+
 ipcMain.handle('update:download', () => {
   if (app.isPackaged) autoUpdater.downloadUpdate().catch(() => {});
 });

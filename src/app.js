@@ -182,6 +182,36 @@ function keyToDate(k) {
 
 const root = document.getElementById('root');
 
+const CONFETTI_COLORS = ['#4E8158', '#7FB183', '#93C097', '#5A7A5A', '#E4EDE1', '#3E6B48', '#B7D3B0'];
+function fireConfetti(x, y) {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const layer = document.createElement('div');
+  layer.className = 'confetti-layer';
+  const N = 90;
+  for (let i = 0; i < N; i++) {
+    const p = document.createElement('span');
+    p.className = 'confetti-piece';
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.15;
+    const power = 90 + Math.random() * 180;
+    const dx = Math.cos(angle) * power;
+    const dy = Math.sin(angle) * power + 60 + Math.random() * 220;
+    const size = 6 + Math.random() * 6;
+    p.style.left = x + 'px';
+    p.style.top = y + 'px';
+    p.style.width = size + 'px';
+    p.style.height = (size * (0.4 + Math.random() * 0.6)) + 'px';
+    p.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    p.style.setProperty('--dx', dx.toFixed(1) + 'px');
+    p.style.setProperty('--dy', dy.toFixed(1) + 'px');
+    p.style.setProperty('--rot', Math.round(Math.random() * 900 - 450) + 'deg');
+    p.style.animationDelay = (Math.random() * 0.05).toFixed(3) + 's';
+    if (Math.random() < 0.5) p.style.borderRadius = '50%';
+    layer.appendChild(p);
+  }
+  document.body.appendChild(layer);
+  setTimeout(() => layer.remove(), 1500);
+}
+
 let lastMainKey = null;
 let lastModalKey = null;
 let animMainEnter = false;
@@ -962,9 +992,12 @@ const actions = {
     if (!sub) return;
     const task = sub.tasks.find(t => t.id === taskId);
     if (!task) return;
+    const wasClosed = subjectClosed(sub);
     task.completed[index] = !task.completed[index];
     lastToggledSegKey = task.completed[index] ? (subjectId + '|' + taskId + '|' + index) : null;
+    const rect = (!wasClosed && subjectClosed(sub)) ? el.getBoundingClientRect() : null;
     setState({});
+    if (rect) fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
   },
 
   deleteSubject: (el) => {
@@ -983,8 +1016,11 @@ const actions = {
     if (!sess) return;
     const sub = sess.subjects.find(s => s.id === el.dataset.subjectId);
     if (!sub) return;
+    const wasClosed = subjectClosed(sub);
     sub.examPassed = !sub.examPassed;
+    const rect = (!wasClosed && subjectClosed(sub)) ? el.getBoundingClientRect() : null;
     setState({});
+    if (rect) fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
   },
 
   deleteSession: (el) => {
