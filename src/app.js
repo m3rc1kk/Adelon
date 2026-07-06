@@ -263,31 +263,37 @@ function versionBadgeHtml() {
   return `<div style="position:fixed;left:14px;bottom:10px;z-index:5;font-size:10.5px;color:var(--text-3);opacity:.55;pointer-events:none;font-family:'Golos Text',system-ui,sans-serif;">v${esc(v)}</div>`;
 }
 
+const RELEASE_NOTES_ALLOWED_TAGS = new Set(['P', 'UL', 'OL', 'LI', 'STRONG', 'EM', 'B', 'I', 'CODE', 'PRE', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'A', 'BLOCKQUOTE', 'HR']);
+
+function sanitizeReleaseHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const walk = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === 8) { node.removeChild(child); return; }
+      if (child.nodeType !== 1) return;
+      if (!RELEASE_NOTES_ALLOWED_TAGS.has(child.tagName)) {
+        node.replaceChild(document.createTextNode(child.textContent), child);
+        return;
+      }
+      [...child.attributes].forEach((attr) => {
+        if (child.tagName === 'A' && attr.name === 'href' && /^https?:\/\//i.test(attr.value.trim())) return;
+        child.removeAttribute(attr.name);
+      });
+      if (child.tagName === 'A') {
+        child.setAttribute('target', '_blank');
+        child.setAttribute('rel', 'noopener noreferrer');
+      }
+      walk(child);
+    });
+  };
+  walk(doc.body);
+  return doc.body.innerHTML;
+}
+
 function formatNotes(raw) {
   const text = String(raw || '').trim();
   if (!text) return `<p style="margin:0;font-size:13px;color:var(--text-3);">Описание изменений не указано.</p>`;
-  const lines = text.split(/\r?\n/);
-  const out = [];
-  let inList = false;
-  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) { closeList(); continue; }
-    const h = /^#{1,6}\s+(.*)$/.exec(line);
-    const li = /^[-*]\s+(.*)$/.exec(line);
-    if (h) {
-      closeList();
-      out.push(`<div style="font-family:'Onest';font-weight:600;font-size:13.5px;color:var(--text);margin:6px 0 2px;">${esc(h[1])}</div>`);
-    } else if (li) {
-      if (!inList) { out.push(`<ul style="margin:2px 0;padding-left:18px;display:flex;flex-direction:column;gap:5px;">`); inList = true; }
-      out.push(`<li style="font-size:13px;line-height:1.5;color:var(--text-2);">${esc(li[1])}</li>`);
-    } else {
-      closeList();
-      out.push(`<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--text-2);">${esc(line)}</p>`);
-    }
-  }
-  closeList();
-  return out.join('');
+  return `<div class="release-notes">${sanitizeReleaseHtml(text)}</div>`;
 }
 
 function updateModalHtml() {
@@ -335,10 +341,10 @@ function updateToastHtml() {
     : `<div style="display:flex;flex-direction:column;gap:8px;min-width:0;flex:1;">
          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
            <span style="font-family:'Onest';font-weight:600;font-size:14.5px;color:var(--text);letter-spacing:-.01em;">Загрузка обновления</span>
-           <span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600;color:var(--text-2);flex-shrink:0;">${pct}%</span>
+           <span id="update-bar-pct" style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600;color:var(--text-2);flex-shrink:0;">${pct}%</span>
          </div>
          <div style="height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
-           <div style="height:100%;border-radius:99px;background:var(--accent);width:${pct}%;transition:width .3s cubic-bezier(.2,.7,.3,1);"></div>
+           <div id="update-bar-fill" style="height:100%;border-radius:99px;background:var(--accent);width:${pct}%;transition:width .4s ease-out;"></div>
          </div>
          <span style="font-size:12px;color:var(--text-3);">${ver}</span>
        </div>`;
@@ -1173,10 +1179,15 @@ function hideSplash() {
       if (!payload) return;
       if (payload.status === 'error') { state.update = null; render(); return; }
       if (payload.status === 'downloading' && state.update && state.update.status === 'downloading' && payload.percent != null) {
-        state.update = Object.assign({}, state.update, { percent: payload.percent });
-      } else {
-        state.update = payload;
+        state.update.percent = payload.percent;
+        const pct = Math.max(0, Math.min(100, payload.percent));
+        const bar = document.getElementById('update-bar-fill');
+        const label = document.getElementById('update-bar-pct');
+        if (bar) bar.style.width = pct + '%';
+        if (label) label.textContent = pct + '%';
+        return;
       }
+      state.update = payload;
       render();
     });
   }

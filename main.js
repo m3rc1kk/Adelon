@@ -111,7 +111,7 @@ ipcMain.handle('update:download', () => {
 });
 
 ipcMain.handle('update:install', () => {
-  if (app.isPackaged) autoUpdater.quitAndInstall();
+  if (app.isPackaged) autoUpdater.quitAndInstall(true, true);
 });
 
 ipcMain.handle('data:load', () => readData());
