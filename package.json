@@ -1,6 +1,6 @@
 {
   "name": "adelon",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Adelon — трекер выполнения лаб, практик и проектов по предметам семестра",
   "main": "main.js",
   "author": "",
@@ -8,9 +8,46 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "build:icon": "node scripts/gen-icon.js"
+    "build:icon": "node scripts/gen-icon.js",
+    "dist": "electron-builder --win",
+    "release": "electron-builder --win --publish always"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "ru.adelon.app",
+    "productName": "Adelon",
+    "files": [
+      "main.js",
+      "preload.js",
+      "ogu.js",
+      "src/**/*",
+      "!scripts",
+      "!.claude"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "${productName}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "m3rc1kk",
+      "repo": "Adelon"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

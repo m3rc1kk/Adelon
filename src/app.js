@@ -65,6 +65,7 @@ const state = {
   schedule: defaultSchedule(),
   oguGroup: null,
   oguSync: null,
+  update: null,
 };
 
 const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync'];
@@ -196,7 +197,7 @@ function render() {
   }
 
   const mainKey = state.navTab + '|' + state.view + '|' + state.currentSessionId + '|' + state.weekOffset;
-  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : null;
+  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
   animMainEnter = mainKey !== lastMainKey;
   animModalEnter = modalKey !== null && modalKey !== lastModalKey;
 
@@ -249,7 +250,115 @@ function template() {
     ${state.showSessionModal ? sessionModalHtml() : ''}
     ${state.showImportModal ? importModalHtml() : ''}
     ${state.confirmDialog ? confirmModalHtml() : ''}
+    ${state.update && state.update.status === 'available' ? updateModalHtml() : ''}
+    ${state.update ? updateToastHtml() : ''}
+    ${versionBadgeHtml()}
   </div>
+  </div>`;
+}
+
+function versionBadgeHtml() {
+  const v = window.adelon && window.adelon.version;
+  if (!v) return '';
+  return `<div style="position:fixed;left:14px;bottom:10px;z-index:5;font-size:10.5px;color:var(--text-3);opacity:.55;pointer-events:none;font-family:'Golos Text',system-ui,sans-serif;">v${esc(v)}</div>`;
+}
+
+function formatNotes(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return `<p style="margin:0;font-size:13px;color:var(--text-3);">Описание изменений не указано.</p>`;
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  let inList = false;
+  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) { closeList(); continue; }
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    const li = /^[-*]\s+(.*)$/.exec(line);
+    if (h) {
+      closeList();
+      out.push(`<div style="font-family:'Onest';font-weight:600;font-size:13.5px;color:var(--text);margin:6px 0 2px;">${esc(h[1])}</div>`);
+    } else if (li) {
+      if (!inList) { out.push(`<ul style="margin:2px 0;padding-left:18px;display:flex;flex-direction:column;gap:5px;">`); inList = true; }
+      out.push(`<li style="font-size:13px;line-height:1.5;color:var(--text-2);">${esc(li[1])}</li>`);
+    } else {
+      closeList();
+      out.push(`<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--text-2);">${esc(line)}</p>`);
+    }
+  }
+  closeList();
+  return out.join('');
+}
+
+function updateModalHtml() {
+  const u = state.update;
+  const ver = u.version ? esc(u.version) : '';
+  return `
+  <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}">
+    <div class="card scroll-y" style="border-radius:18px;padding:26px;width:480px;max-width:100%;max-height:86vh;display:flex;flex-direction:column;gap:20px;" data-stop="1">
+      <div style="display:flex;align-items:center;gap:13px;">
+        <span style="width:46px;height:46px;border-radius:13px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);">${icon('download', 23)}</span>
+        <div style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;">
+          <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Доступно обновление</h2>
+          <span style="font-size:12.5px;color:var(--text-2);">${ver ? 'Версия ' + ver + ' готова к установке' : 'Новая версия готова к установке'}</span>
+        </div>
+        ${ver ? `<span style="align-self:flex-start;font-family:'Golos Text';font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:99px;background:var(--surface-2);color:var(--text-2);white-space:nowrap;flex-shrink:0;">v${ver}</span>` : ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <span style="font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);">Что нового</span>
+        <div class="scroll-y" style="max-height:38vh;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--bg);">
+          ${formatNotes(u.notes)}
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:2px;">
+        <button class="ghost-btn" data-action="dismissUpdate">Позже</button>
+        <button class="primary-btn" data-action="downloadUpdate" style="display:flex;align-items:center;gap:7px;">${icon('download', 16)}Скачать и установить</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function updateToastHtml() {
+  const u = state.update;
+  if (!u || (u.status !== 'downloading' && u.status !== 'ready')) return '';
+  const ready = u.status === 'ready';
+  const pct = Math.max(0, Math.min(100, u.percent || 0));
+  const ver = u.version ? 'Версия ' + esc(u.version) : 'Новая версия';
+
+  const iconWrap = `<span style="width:40px;height:40px;border-radius:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${ready ? 'var(--good-soft)' : 'var(--accent-soft)'};color:${ready ? 'var(--good)' : 'var(--accent-2)'};">${icon(ready ? 'check' : 'download', 20)}</span>`;
+
+  const bodyHtml = ready
+    ? `<div style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;">
+         <span style="font-family:'Onest';font-weight:600;font-size:14.5px;color:var(--text);letter-spacing:-.01em;">Обновление готово</span>
+         <span style="font-size:12.5px;color:var(--text-2);">${ver} · установится после перезапуска</span>
+       </div>`
+    : `<div style="display:flex;flex-direction:column;gap:8px;min-width:0;flex:1;">
+         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+           <span style="font-family:'Onest';font-weight:600;font-size:14.5px;color:var(--text);letter-spacing:-.01em;">Загрузка обновления</span>
+           <span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600;color:var(--text-2);flex-shrink:0;">${pct}%</span>
+         </div>
+         <div style="height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
+           <div style="height:100%;border-radius:99px;background:var(--accent);width:${pct}%;transition:width .3s cubic-bezier(.2,.7,.3,1);"></div>
+         </div>
+         <span style="font-size:12px;color:var(--text-3);">${ver}</span>
+       </div>`;
+
+  const footer = ready
+    ? `<div style="display:flex;gap:8px;justify-content:flex-end;">
+         <button class="ghost-btn" style="padding:8px 14px;font-size:13px;" data-action="dismissUpdate">Позже</button>
+         <button class="primary-btn" style="padding:8px 16px;font-size:13px;" data-action="installUpdate">Перезапустить</button>
+       </div>`
+    : '';
+
+  return `
+  <div class="update-toast" style="position:fixed;right:24px;bottom:24px;z-index:200;width:340px;max-width:calc(100vw - 48px);">
+    <div class="card" style="border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:0 14px 40px rgba(20,16,12,.22);">
+      <div style="display:flex;align-items:${ready ? 'center' : 'flex-start'};gap:12px;">
+        ${iconWrap}
+        ${bodyHtml}
+      </div>
+      ${footer}
+    </div>
   </div>`;
 }
 
@@ -958,6 +1067,14 @@ const actions = {
     setState({ showAddModal: false });
   },
 
+  downloadUpdate: () => {
+    if (window.adelon && window.adelon.update) window.adelon.update.download();
+    const v = state.update ? state.update.version : null;
+    setUI({ update: { status: 'downloading', version: v, percent: 0 } });
+  },
+  installUpdate: () => { if (window.adelon && window.adelon.update) window.adelon.update.install(); },
+  dismissUpdate: () => setUI({ update: null }),
+
   openSessionModal: () => setUI({ showSessionModal: true, sessionDraft: { name: '', period: '' } }),
   closeSessionModal: () => setUI({ showSessionModal: false }),
   submitSession: () => {
@@ -1034,6 +1151,7 @@ document.addEventListener('keydown', (e) => {
     else if (state.showAddModal) actions.closeAddModal();
     else if (state.showSessionModal) actions.closeSessionModal();
     else if (state.showImportModal) actions.closeImportModal();
+    else if (state.update && state.update.status === 'available') actions.dismissUpdate();
     else if (state.showThemeMenu) actions.closeThemeMenu();
   }
 });
@@ -1049,6 +1167,19 @@ function hideSplash() {
   const startedAt = Date.now();
   await loadPersisted();
   render();
+
+  if (window.adelon && window.adelon.update) {
+    window.adelon.update.onStatus((payload) => {
+      if (!payload) return;
+      if (payload.status === 'error') { state.update = null; render(); return; }
+      if (payload.status === 'downloading' && state.update && state.update.status === 'downloading' && payload.percent != null) {
+        state.update = Object.assign({}, state.update, { percent: payload.percent });
+      } else {
+        state.update = payload;
+      }
+      render();
+    });
+  }
   const MIN_SPLASH = 1100;
   const wait = Math.max(0, MIN_SPLASH - (Date.now() - startedAt));
   setTimeout(hideSplash, wait);

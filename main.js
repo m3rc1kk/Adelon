@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ogu = require('./ogu');
+const { autoUpdater } = require('electron-updater');
 
 app.setName('Adelon');
 
@@ -40,6 +41,8 @@ function writeData(data) {
   }
 }
 
+let mainWindow = null;
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1300,
@@ -57,12 +60,59 @@ function createWindow() {
     },
   });
 
+  mainWindow = win;
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
+
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   if (process.argv.includes('--dev')) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 }
+
+function sendUpdate(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update:status', payload);
+  }
+}
+
+function extractNotes(info) {
+  const rn = info && info.releaseNotes;
+  if (!rn) return '';
+  if (typeof rn === 'string') return rn;
+  if (Array.isArray(rn)) return rn.map((n) => (n && n.note) || '').filter(Boolean).join('\n\n');
+  return String(rn);
+}
+
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-available', (info) => {
+    sendUpdate({ status: 'available', version: info.version, notes: extractNotes(info) });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    sendUpdate({ status: 'downloading', percent: Math.round(p.percent) });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    sendUpdate({ status: 'ready', version: info.version });
+  });
+  autoUpdater.on('error', (err) => {
+    sendUpdate({ status: 'error', error: String(err && err.message || err) });
+  });
+
+  autoUpdater.checkForUpdates().catch(() => {});
+}
+
+ipcMain.handle('update:download', () => {
+  if (app.isPackaged) autoUpdater.downloadUpdate().catch(() => {});
+});
+
+ipcMain.handle('update:install', () => {
+  if (app.isPackaged) autoUpdater.quitAndInstall();
+});
 
 ipcMain.handle('data:load', () => readData());
 ipcMain.handle('data:save', (_e, data) => writeData(data));
@@ -78,6 +128,7 @@ ipcMain.handle('ogu:schedule', oguHandler((group) => ogu.schedule(group)));
 
 app.whenReady().then(() => {
   createWindow();
+  setupAutoUpdate();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
