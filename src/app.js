@@ -90,6 +90,10 @@ const state = {
   editSubjectId: null,
   examPanelOpen: false,
   examGroup: EXAM_GROUPS[0] ? EXAM_GROUPS[0].id : null,
+  userExams: {},
+  hiddenExams: [],
+  showExamModal: false,
+  examDraft: { name: '', kind: 'exam', date: '', dateUnknown: false },
   showSessionModal: false,
   showLessonModal: false,
   lessonEdit: null,
@@ -108,7 +112,7 @@ const state = {
   update: null,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams'];
 
 function collectPersist() {
   const out = {};
@@ -135,6 +139,8 @@ async function loadPersisted() {
       if (data.oguGroup && typeof data.oguGroup === 'object') state.oguGroup = data.oguGroup;
       if (data.oguSync && typeof data.oguSync === 'object') state.oguSync = data.oguSync;
       if (typeof data.examGroup === 'string' && EXAM_SCHEDULES[data.examGroup]) state.examGroup = data.examGroup;
+      if (data.userExams && typeof data.userExams === 'object' && !Array.isArray(data.userExams)) state.userExams = data.userExams;
+      if (Array.isArray(data.hiddenExams)) state.hiddenExams = data.hiddenExams;
     }
     rememberTheme(state.themeId);
   } catch (e) {
@@ -225,13 +231,20 @@ function keyToDate(k) {
   return new Date(y, m - 1, d);
 }
 
+function groupExamList(groupId) {
+  if (!groupId) return [];
+  const hidden = state.hiddenExams || [];
+  const base = (EXAM_SCHEDULES[groupId] || []).filter(e => !hidden.includes(e.id));
+  const user = ((state.userExams && state.userExams[groupId]) || []).filter(e => !hidden.includes(e.id));
+  return [...base, ...user.map(e => ({ ...e, _user: true }))];
+}
 function currentExamList() {
-  return (state.examGroup && EXAM_SCHEDULES[state.examGroup]) || [];
+  return groupExamList(state.examGroup);
 }
 function examById(id) {
   if (!id) return null;
-  for (const g in EXAM_SCHEDULES) {
-    const found = EXAM_SCHEDULES[g].find(e => e.id === id);
+  for (const g of EXAM_GROUPS) {
+    const found = groupExamList(g.id).find(e => e.id === id);
     if (found) return found;
   }
   return null;
@@ -243,7 +256,7 @@ function examGroupTitle(id) {
 function fmtExamDate(dateStr) {
   if (!dateStr) return 'дата уточняется';
   const d = keyToDate(dateStr);
-  return d.getDate() + ' ' + RU_MONTHS[d.getMonth()];
+  return d.getDate() + ' ' + RU_MONTHS[d.getMonth()] + ' ' + d.getFullYear();
 }
 function daysUntil(dateStr) {
   if (!dateStr) return null;
@@ -311,7 +324,7 @@ function render() {
   }
 
   const mainKey = state.navTab + '|' + state.view + '|' + state.currentSessionId + '|' + state.weekOffset;
-  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
+  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showExamModal ? 'exam' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
   animMainEnter = mainKey !== lastMainKey;
   animModalEnter = modalKey !== null && modalKey !== lastModalKey;
   animExamEnter = state.examPanelOpen && !lastExamPanelOpen;
@@ -365,6 +378,7 @@ function template() {
     ${state.navTab === 'schedule' ? scheduleViewHtml() : ''}
     ${state.showAddModal ? addModalHtml() : ''}
     ${state.showSessionModal ? sessionModalHtml() : ''}
+    ${state.showExamModal ? examModalHtml() : ''}
     ${state.showImportModal ? importModalHtml() : ''}
     ${state.confirmDialog ? confirmModalHtml() : ''}
     ${state.update && state.update.status === 'available' ? updateModalHtml() : ''}
@@ -734,11 +748,12 @@ function examPanelHtml() {
       <span style="width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${accentBg};color:${accentCol};">${icon(isExam ? 'cap' : 'clipboard', 17)}</span>
       <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;">
         <span style="font-size:14px;font-weight:500;color:var(--text);overflow-wrap:anywhere;">${esc(e.name)}</span>
-        <span style="font-size:12px;color:var(--text-3);">${examKindLabel(e.kind)}</span>
+        <span style="font-size:12px;color:var(--text-3);">${examKindLabel(e.kind)}${e._user ? ' · добавлено вами' : ''}</span>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">
         ${dateBlock}
       </div>
+      <button class="mini-icon-btn exam-del" data-action="deleteExam" data-exam-id="${esc(e.id)}" title="Удалить из моего списка" style="width:28px;height:28px;flex-shrink:0;">${icon('trash', 13)}</button>
     </div>`;
   }).join('');
 
@@ -750,9 +765,17 @@ function examPanelHtml() {
       <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 14)}</span>
     </div>`;
 
-  const bodyContent = items.length
+  const hiddenCount = (EXAM_SCHEDULES[state.examGroup] || []).filter(e => (state.hiddenExams || []).includes(e.id)).length;
+  const restoreBtn = hiddenCount
+    ? `<button class="link-btn" data-action="restoreExams" title="Вернуть удалённые пункты из общего списка" style="flex-shrink:0;">${icon('refresh', 14)}Вернуть скрытые · ${hiddenCount}</button>`
+    : '';
+  const footer = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:${items.length ? 12 : 8}px;">
+    <button class="dashed-inline" data-action="openExamModal">${icon('plus', 15)}Добавить экзамен или зачёт</button>
+    ${restoreBtn}
+  </div>`;
+  const bodyContent = (items.length
     ? rows
-    : `<div style="padding:4px 2px 2px;font-size:13px;color:var(--text-3);">Для группы ${esc(examGroupTitle(state.examGroup))} список пока пуст.</div>`;
+    : `<div style="padding:4px 2px 2px;font-size:13px;color:var(--text-3);">Для группы ${esc(examGroupTitle(state.examGroup))} список пока пуст.</div>`) + footer;
 
   return `
   <div style="max-width:1240px;margin:0 auto;width:100%;padding:0 32px 20px;">
@@ -766,7 +789,7 @@ function examPanelHtml() {
         ${groupSelect}
         <button class="exam-chevron${animExamEnter ? ' rotate-in' : animExamExit ? ' rotate-out' : ''}" data-action="toggleExamPanel" style="display:flex;flex-shrink:0;color:var(--text-3);background:transparent;border:none;cursor:pointer;padding:4px;border-radius:6px;transform:rotate(${open ? 180 : 0}deg);">${icon('chevron-down', 18)}</button>
       </div>
-      ${open ? `<div class="exam-body-anim" style="padding:0 22px 14px;">${bodyContent}</div>` : ''}
+      ${open ? `<div class="${animExamEnter ? 'exam-body-anim' : ''}" style="padding:0 22px 14px;">${bodyContent}</div>` : ''}
     </div>
   </div>`;
 }
@@ -1069,6 +1092,47 @@ function sessionModalHtml() {
   </div>`;
 }
 
+function examModalHtml() {
+  const d = state.examDraft;
+  const submitDisabled = d.name.trim().length === 0;
+  const kindOpts = [
+    { value: 'exam', label: 'Экзамен' },
+    { value: 'zachet', label: 'Зачёт' },
+  ].map(o => `<button class="tab-btn ${d.kind === o.value ? 'active' : 'idle'}" style="flex:1;" data-action="setExamKind" data-kind="${o.value}">${o.label}</button>`).join('');
+  return `
+  <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}">
+    <div class="card" style="border-radius:18px;padding:26px;width:420px;max-width:100%;display:flex;flex-direction:column;gap:20px;" data-stop="1">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Экзамен или зачёт</h2>
+        <button class="close-btn" data-action="closeExamModal">${icon('x', 16)}</button>
+      </div>
+      <p style="margin:-6px 0 0;font-size:12.5px;color:var(--text-3);line-height:1.5;">Добавится только в твой список группы ${esc(examGroupTitle(state.examGroup))}. Другие пользователи это не увидят.</p>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <label style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Название</span>
+          <input type="text" id="exam-name" class="text-input" placeholder="Например, Базы данных" value="${esc(d.name)}" data-input="examDraftName" />
+        </label>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Тип</span>
+          <div style="display:flex;gap:3px;background:var(--surface-2);padding:3px;border-radius:11px;">${kindOpts}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Дата</span>
+          <input type="date" id="exam-date" class="text-input" value="${esc(d.date)}" data-input="examDraftDate" ${d.dateUnknown ? 'disabled' : ''} style="${d.dateUnknown ? 'opacity:.45;' : ''}" />
+          <button data-action="toggleExamDateUnknown" style="display:inline-flex;align-items:center;gap:8px;background:transparent;border:none;cursor:pointer;padding:2px 0;font-family:inherit;font-size:12.5px;color:var(--text-2);align-self:flex-start;">
+            <span style="width:18px;height:18px;border-radius:5px;border:1.5px solid ${d.dateUnknown ? 'var(--accent)' : 'var(--border)'};background:${d.dateUnknown ? 'var(--accent)' : 'transparent'};display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;">${d.dateUnknown ? icon('check', 12) : ''}</span>
+            Дата пока неизвестна
+          </button>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
+        <button class="ghost-btn" data-action="closeExamModal">Отмена</button>
+        <button class="primary-btn" data-action="submitExam" ${submitDisabled ? 'disabled' : ''} style="opacity:${submitDisabled ? 0.5 : 1};">Добавить</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function importModalHtml() {
   const u = state.oguUI || {};
   const notAvailable = !oguAvailable();
@@ -1337,6 +1401,52 @@ const actions = {
     setState({ showSessionModal: false });
   },
 
+  openExamModal: () => {
+    if (!state.examGroup) return;
+    setUI({ showExamModal: true, examDraft: { name: '', kind: 'exam', date: '', dateUnknown: false } });
+  },
+  closeExamModal: () => setUI({ showExamModal: false }),
+  setExamKind: (el) => setUI({ examDraft: { ...state.examDraft, kind: el.dataset.kind } }),
+  toggleExamDateUnknown: () => setUI({ examDraft: { ...state.examDraft, dateUnknown: !state.examDraft.dateUnknown } }),
+  submitExam: () => {
+    const d = state.examDraft;
+    const g = state.examGroup;
+    if (!d.name.trim() || !g) return;
+    const item = {
+      id: uid('uex'),
+      name: d.name.trim(),
+      kind: d.kind === 'zachet' ? 'zachet' : 'exam',
+      date: d.dateUnknown ? null : (d.date || null),
+    };
+    if (!state.userExams[g]) state.userExams[g] = [];
+    state.userExams[g] = [...state.userExams[g], item];
+    setState({ showExamModal: false });
+  },
+  restoreExams: () => {
+    const g = state.examGroup;
+    if (!g) return;
+    const baseIds = (EXAM_SCHEDULES[g] || []).map(e => e.id);
+    state.hiddenExams = (state.hiddenExams || []).filter(id => !baseIds.includes(id));
+    setState({});
+  },
+  deleteExam: (el) => {
+    const id = el.dataset.examId;
+    const g = state.examGroup;
+    if (!id || !g) return;
+    const userArr = (state.userExams && state.userExams[g]) || [];
+    const isUser = userArr.some(e => e.id === id);
+    const item = currentExamList().find(e => e.id === id);
+    const label = item ? item.name : 'запись';
+    askConfirm({ title: 'Удалить из списка?', message: `«${label}» пропадёт из твоего списка экзаменов и зачётов.`, confirmLabel: 'Удалить' }, () => {
+      if (isUser) {
+        state.userExams[g] = userArr.filter(e => e.id !== id);
+      } else if (!state.hiddenExams.includes(id)) {
+        state.hiddenExams = [...state.hiddenExams, id];
+      }
+      setState({});
+    });
+  },
+
 };
 
 const inputHandlers = {
@@ -1349,6 +1459,8 @@ const inputHandlers = {
   examGroupSelect: (v) => { setState({ examGroup: v || null }); },
   sessionName: (v) => { state.sessionDraft.name = v; updateSubmitState('sess-name'); },
   sessionPeriod: (v) => { state.sessionDraft.period = v; },
+  examDraftName: (v) => { state.examDraft.name = v; updateSubmitState('exam-name'); },
+  examDraftDate: (v) => { state.examDraft.date = v; },
   oguDivision: (v) => { oguLoadCourses(Number(v), 2); },
   oguCourse: (v) => { oguLoadGroups(state.oguUI.divId, Number(v), state.oguGroup && state.oguGroup.groupId); },
   oguGroup: (v) => { patchOgu({ groupId: Number(v) }); },
@@ -1362,6 +1474,7 @@ function updateSubmitState(_srcId) {
   let disabled = false;
   if (state.showAddModal) disabled = state.draft.name.trim().length === 0;
   else if (state.showSessionModal) disabled = state.sessionDraft.name.trim().length === 0;
+  else if (state.showExamModal) disabled = state.examDraft.name.trim().length === 0;
   else if (state.showLessonModal) disabled = !state.lessonDraft || state.lessonDraft.name.trim().length === 0;
   btn.disabled = disabled;
   btn.style.opacity = disabled ? 0.5 : 1;
@@ -1395,7 +1508,7 @@ root.addEventListener('change', (e) => {
   const el = e.target.closest('[data-input]');
   if (!el) return;
   const name = el.dataset.input;
-  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup', 'examLink', 'examGroupSelect'].includes(name)) {
+  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup', 'examLink', 'examGroupSelect', 'examDraftDate'].includes(name)) {
     const h = inputHandlers[name];
     if (h) h(el.value, el);
   }
@@ -1406,6 +1519,7 @@ document.addEventListener('keydown', (e) => {
     if (state.confirmDialog) actions.confirmNo();
     else if (state.showAddModal) actions.closeAddModal();
     else if (state.showSessionModal) actions.closeSessionModal();
+    else if (state.showExamModal) actions.closeExamModal();
     else if (state.showImportModal) actions.closeImportModal();
     else if (state.update && state.update.status === 'available') actions.dismissUpdate();
     else if (state.showThemeMenu) actions.closeThemeMenu();
