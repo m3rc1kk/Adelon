@@ -71,8 +71,8 @@ input,select,textarea{font-family:inherit;}
 .dashed-add:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);transform:translateY(-1px);}
 .dashed-add:active{transform:translateY(0);}
 
-.seg{flex:1;height:6px;min-width:5px;border:none;padding:0;border-radius:3px;cursor:pointer;transition:background .15s, transform .1s;}
-.seg:hover{transform:scaleY(1.35);}
+.seg{flex:1;height:7px;min-width:5px;border:none;padding:0;border-radius:3.5px;cursor:pointer;transition:background .15s, transform .1s;}
+.seg:hover{transform:scaleY(1.3);}
 
 .text-input{border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:'Golos Text',system-ui,sans-serif;font-size:14px;color:var(--text);background:var(--bg);outline:none;transition:border-color .15s;}
 .text-input:focus{border-color:var(--accent);}
@@ -152,6 +152,18 @@ body{transition:background-color .25s ease;}
 .release-notes a{color:var(--accent-2);}
 .release-notes blockquote{margin:0;padding-left:12px;border-left:2px solid var(--border-strong);color:var(--text-3);}
 .release-notes hr{border:none;border-top:1px solid var(--border);}
+
+.exam-toggle{transition:background .15s;font-family:inherit;}
+.exam-toggle:hover{background:var(--surface-2) !important;}
+.exam-chevron:hover{background:var(--surface-2) !important;color:var(--text-2) !important;}
+@media (prefers-reduced-motion: no-preference){
+  .exam-body-anim{animation:exam-panel-in .24s cubic-bezier(.2,.7,.3,1) both;}
+  .exam-chevron.rotate-in{animation:chevron-rotate-open .22s ease both;}
+  .exam-chevron.rotate-out{animation:chevron-rotate-close .22s ease both;}
+}
+@keyframes exam-panel-in{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
+@keyframes chevron-rotate-open{from{transform:rotate(0deg);}to{transform:rotate(180deg);}}
+@keyframes chevron-rotate-close{from{transform:rotate(180deg);}to{transform:rotate(0deg);}}
 
 .confetti-layer{position:fixed;inset:0;z-index:9998;pointer-events:none;overflow:hidden;}
 .confetti-piece{position:fixed;top:0;left:0;will-change:transform,opacity;opacity:0;}

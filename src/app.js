@@ -4,6 +4,8 @@ const TASK_TYPES = [
   { type: 'flask', label: 'Лабораторные' },
   { type: 'pen', label: 'Практические' },
   { type: 'folder', label: 'Проект' },
+  { type: 'book', label: 'Курсовая' },
+  { type: 'custom', label: 'Другое' },
 ];
 
 const AUTO_TYPES = [
@@ -11,6 +13,41 @@ const AUTO_TYPES = [
   { value: 'admit', label: 'Допуск', name: 'допуск', Name: 'Допуск' },
   { value: 'point', label: '+Балл', name: 'балл', Name: 'Балл' },
 ];
+
+const EXAM_GROUPS = [
+  { id: '41pg', title: '41ПГ' },
+  { id: '41pi', title: '41ПИ' },
+  { id: '41it', title: '41ИТ' },
+  { id: '41ivt', title: '41ИВТ' },
+];
+
+const EXAM_SCHEDULES = {
+  '41pg': [
+    { id: '41pg-hist', name: 'История России', kind: 'zachet', date: '2027-01-09' },
+    { id: '41pg-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-13' },
+    { id: '41pg-matan', name: 'Математический анализ', kind: 'exam', date: '2027-01-16' },
+    { id: '41pg-prog', name: 'Программирование', kind: 'exam', date: '2027-01-21' },
+    { id: '41pg-db', name: 'Базы данных', kind: 'exam', date: null },
+  ],
+  '41pi': [
+    { id: '41pi-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-10' },
+    { id: '41pi-phys', name: 'Физика', kind: 'exam', date: '2027-01-15' },
+    { id: '41pi-prog', name: 'Программирование', kind: 'exam', date: '2027-01-19' },
+    { id: '41pi-oop', name: 'ООП', kind: 'exam', date: '2027-01-24' },
+  ],
+  '41it': [
+    { id: '41it-phil', name: 'Философия', kind: 'zachet', date: '2027-01-11' },
+    { id: '41it-net', name: 'Компьютерные сети', kind: 'exam', date: '2027-01-17' },
+    { id: '41it-db', name: 'Базы данных', kind: 'exam', date: '2027-01-22' },
+    { id: '41it-web', name: 'Веб-технологии', kind: 'zachet', date: null },
+  ],
+  '41ivt': [
+    { id: '41ivt-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-12' },
+    { id: '41ivt-arch', name: 'Архитектура ЭВМ', kind: 'exam', date: '2027-01-18' },
+    { id: '41ivt-os', name: 'Операционные системы', kind: 'exam', date: '2027-01-23' },
+    { id: '41ivt-math', name: 'Дискретная математика', kind: 'exam', date: '2027-01-27' },
+  ],
+};
 
 const THEME_OPTIONS = [
   { id: 'warm-light', label: 'Тёплая светлая', bg: '#F4F1EB', accent: '#4E8158' },
@@ -50,6 +87,9 @@ const state = {
   view: 'sessions',
   currentSessionId: null,
   showAddModal: false,
+  editSubjectId: null,
+  examPanelOpen: false,
+  examGroup: EXAM_GROUPS[0] ? EXAM_GROUPS[0].id : null,
   showSessionModal: false,
   showLessonModal: false,
   lessonEdit: null,
@@ -68,7 +108,7 @@ const state = {
   update: null,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup'];
 
 function collectPersist() {
   const out = {};
@@ -94,6 +134,7 @@ async function loadPersisted() {
       if (data.schedule && typeof data.schedule === 'object' && !Array.isArray(data.schedule)) state.schedule = data.schedule;
       if (data.oguGroup && typeof data.oguGroup === 'object') state.oguGroup = data.oguGroup;
       if (data.oguSync && typeof data.oguSync === 'object') state.oguSync = data.oguSync;
+      if (typeof data.examGroup === 'string' && EXAM_SCHEDULES[data.examGroup]) state.examGroup = data.examGroup;
     }
     rememberTheme(state.themeId);
   } catch (e) {
@@ -145,6 +186,10 @@ function icon(name, size) {
     flask: '<path d="M9 3h6"/><path d="M10 3v6l-5.2 8.4A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.6L14 9V3"/><path d="M8.2 14.5h7.6"/>',
     pen: '<path d="M4 20l4.5-1L19 8.5 15.5 5 5 15.5 4 20z"/><path d="M13.5 7L17 10.5"/>',
     folder: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-10z"/>',
+    book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v14H6.5A1.5 1.5 0 0 0 5 18.5V4.5z"/><path d="M5 18.5A1.5 1.5 0 0 0 6.5 20H19v-3"/><path d="M8.5 7.5h6.5"/><path d="M8.5 10.5h4.5"/>',
+    custom: '<path d="M4 7h11"/><path d="M4 12h11"/><path d="M4 17h7"/><path d="M18.5 15.5l2 2-4.5 4.5H14v-2z"/>',
+    clipboard: '<path d="M9 4.5H7A1.5 1.5 0 0 0 5.5 6v13A1.5 1.5 0 0 0 7 20.5h10A1.5 1.5 0 0 0 18.5 19V6A1.5 1.5 0 0 0 17 4.5h-2"/><rect x="9" y="3" width="6" height="3.4" rx="1"/><path d="M8.5 11.5h7"/><path d="M8.5 15h4.5"/>',
+    edit: '<path d="M4 20l4.5-1L19 8.5 15.5 5 5 15.5 4 20z"/><path d="M13.5 7L17 10.5"/>',
     check: '<path d="M4.5 12.5l4.5 4.5L19.5 6.5"/>',
     plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
     x: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
@@ -179,6 +224,42 @@ function keyToDate(k) {
   const [y, m, d] = k.split('-').map(Number);
   return new Date(y, m - 1, d);
 }
+
+function currentExamList() {
+  return (state.examGroup && EXAM_SCHEDULES[state.examGroup]) || [];
+}
+function examById(id) {
+  if (!id) return null;
+  for (const g in EXAM_SCHEDULES) {
+    const found = EXAM_SCHEDULES[g].find(e => e.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+function examGroupTitle(id) {
+  const g = EXAM_GROUPS.find(x => x.id === id);
+  return g ? g.title : '';
+}
+function fmtExamDate(dateStr) {
+  if (!dateStr) return 'дата уточняется';
+  const d = keyToDate(dateStr);
+  return d.getDate() + ' ' + RU_MONTHS[d.getMonth()];
+}
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const d = keyToDate(dateStr); d.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((d - today) / 86400000);
+}
+function daysUntilText(dateStr) {
+  const n = daysUntil(dateStr);
+  if (n === null) return '';
+  if (n < 0) return 'прошёл';
+  if (n === 0) return 'сегодня';
+  if (n === 1) return 'завтра';
+  return 'через ' + n + ' ' + plural(n, ['день', 'дня', 'дней']);
+}
+const examKindLabel = (kind) => kind === 'exam' ? 'Экзамен' : 'Зачёт';
 
 const root = document.getElementById('root');
 
@@ -217,6 +298,9 @@ let lastModalKey = null;
 let animMainEnter = false;
 let animModalEnter = false;
 let lastToggledSegKey = null;
+let lastExamPanelOpen = false;
+let animExamEnter = false;
+let animExamExit = false;
 
 function render() {
   const active = document.activeElement;
@@ -230,6 +314,8 @@ function render() {
   const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
   animMainEnter = mainKey !== lastMainKey;
   animModalEnter = modalKey !== null && modalKey !== lastModalKey;
+  animExamEnter = state.examPanelOpen && !lastExamPanelOpen;
+  animExamExit = !state.examPanelOpen && lastExamPanelOpen;
 
   document.documentElement.setAttribute('data-theme', state.themeId);
   document.body.style.background = 'var(--bg)';
@@ -238,6 +324,7 @@ function render() {
   lastMainKey = mainKey;
   lastModalKey = modalKey;
   lastToggledSegKey = null;
+  lastExamPanelOpen = state.examPanelOpen;
 
   if (activeId) {
     const el = document.getElementById(activeId);
@@ -578,7 +665,7 @@ function sessionsViewHtml() {
       <div style="display:flex;flex-direction:column;gap:11px;margin-top:auto;">
         <div style="height:1px;background:var(--border);"></div>
         <div style="display:flex;align-items:center;gap:12px;">
-          <div style="flex:1;height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
+          <div style="flex:1;height:7px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
             <div style="height:100%;border-radius:99px;transition:width .4s cubic-bezier(.2,.7,.3,1);background:${isDone ? 'var(--good)' : 'var(--accent)'};width:${pct}%;"></div>
           </div>
           <span style="font-family:'Golos Text';font-size:12.5px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:34px;text-align:right;">${pct}%</span>
@@ -622,12 +709,78 @@ function sessionsViewHtml() {
   </div>`;
 }
 
+function examPanelHtml() {
+  if (!EXAM_GROUPS.length) return '';
+  const open = state.examPanelOpen;
+  const list = currentExamList();
+  const items = [...list].sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+  });
+  const rows = items.map((e, idx) => {
+    const isExam = e.kind === 'exam';
+    const n = daysUntil(e.date);
+    const soon = n !== null && n >= 0 && n <= 7;
+    const accentBg = 'var(--accent-soft)';
+    const accentCol = 'var(--accent-2)';
+    const dateBlock = e.date
+      ? `<span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;">${fmtExamDate(e.date)}</span>
+         <span style="font-size:11.5px;color:${soon ? 'var(--accent-2)' : 'var(--text-3)'};white-space:nowrap;">${daysUntilText(e.date)}</span>`
+      : `<span style="font-size:12px;color:var(--text-3);white-space:nowrap;font-style:italic;">Дата уточняется</span>`;
+    return `
+    <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;${idx ? 'border-top:1px solid var(--border);' : ''}">
+      <span style="width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${accentBg};color:${accentCol};">${icon(isExam ? 'cap' : 'clipboard', 17)}</span>
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;">
+        <span style="font-size:14px;font-weight:500;color:var(--text);overflow-wrap:anywhere;">${esc(e.name)}</span>
+        <span style="font-size:12px;color:var(--text-3);">${examKindLabel(e.kind)}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">
+        ${dateBlock}
+      </div>
+    </div>`;
+  }).join('');
+
+  const groupSelect = `
+    <div style="position:relative;display:flex;flex-shrink:0;">
+      <select class="select-input" data-input="examGroupSelect" style="padding:7px 32px 7px 12px;font-size:13px;min-width:112px;">
+        ${EXAM_GROUPS.map(g => `<option value="${esc(g.id)}" ${g.id === state.examGroup ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}
+      </select>
+      <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 14)}</span>
+    </div>`;
+
+  const bodyContent = items.length
+    ? rows
+    : `<div style="padding:4px 2px 2px;font-size:13px;color:var(--text-3);">Для группы ${esc(examGroupTitle(state.examGroup))} список пока пуст.</div>`;
+
+  return `
+  <div style="max-width:1240px;margin:0 auto;width:100%;padding:0 32px 20px;">
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:10px;padding:11px 14px 11px 22px;">
+        <span style="display:flex;color:var(--text-2);flex-shrink:0;">${icon('cap', 17)}</span>
+        <button class="exam-toggle" data-action="toggleExamPanel" style="flex:1;display:flex;align-items:center;gap:8px;background:transparent;border:none;cursor:pointer;padding:8px 6px;margin:-8px -6px;border-radius:8px;text-align:left;min-width:0;">
+          <span style="font-family:'Onest';font-weight:600;font-size:15px;color:var(--text);white-space:nowrap;">Экзамены и зачёты</span>
+          ${state.examGroup ? `<span style="font-size:12.5px;color:var(--text-3);white-space:nowrap;">· ${esc(examGroupTitle(state.examGroup))}</span>` : ''}
+        </button>
+        ${groupSelect}
+        <button class="exam-chevron${animExamEnter ? ' rotate-in' : animExamExit ? ' rotate-out' : ''}" data-action="toggleExamPanel" style="display:flex;flex-shrink:0;color:var(--text-3);background:transparent;border:none;cursor:pointer;padding:4px;border-radius:6px;transform:rotate(${open ? 180 : 0}deg);">${icon('chevron-down', 18)}</button>
+      </div>
+      ${open ? `<div class="exam-body-anim" style="padding:0 22px 14px;">${bodyContent}</div>` : ''}
+    </div>
+  </div>`;
+}
+
 function subjectsViewHtml() {
   const current = state.sessions.find(s => s.id === state.currentSessionId);
   const subjects = (current ? current.subjects : []);
 
   const subjectCards = subjects.map(s => {
     const L = AUTO_TYPES.find(a => a.value === (s.autoType || 'auto')) || AUTO_TYPES[0];
+    const linkedExam = examById(s.examLink);
+    const examChip = linkedExam
+      ? `<div style="display:inline-flex;align-items:center;gap:5px;margin-top:3px;padding:3px 9px 3px 7px;border-radius:99px;background:var(--accent-soft);color:var(--accent-2);font-size:11px;font-weight:600;align-self:flex-start;white-space:nowrap;max-width:100%;">${icon(linkedExam.kind === 'exam' ? 'cap' : 'clipboard', 12)}${examKindLabel(linkedExam.kind)}${linkedExam.date ? ' · ' + fmtExamDate(linkedExam.date) : ''}</div>`
+      : '';
     const examPassed = !!s.examPassed;
     const done = s.tasks.reduce((a, t) => a + taskDone(t), 0);
     const total = s.tasks.reduce((a, t) => a + t.total, 0) || 1;
@@ -674,6 +827,7 @@ function subjectsViewHtml() {
         <div style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;">
           <div style="font-family:'Onest';font-weight:600;font-size:18px;letter-spacing:-.015em;color:var(--text);line-height:1.2;overflow-wrap:anywhere;">${esc(s.name)}</div>
           <div style="font-size:12.5px;color:var(--text-3);overflow-wrap:anywhere;">${esc(s.meta)}</div>
+          ${examChip}
         </div>
         <div style="flex-shrink:0;max-width:45%;display:flex;justify-content:flex-end;">${badge}</div>
       </div>
@@ -681,7 +835,7 @@ function subjectsViewHtml() {
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:auto;padding-top:2px;">
         <div style="height:1px;background:var(--border);"></div>
         <div style="display:flex;align-items:center;gap:12px;">
-          <div style="flex:1;height:5px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
+          <div style="flex:1;height:7px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
             <div style="height:100%;border-radius:99px;transition:width .3s;background:${closed ? 'var(--good)' : 'var(--accent)'};width:${displayPct}%;"></div>
           </div>
           <span style="font-family:'Golos Text';font-size:12.5px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:34px;text-align:right;">${displayPct}%</span>
@@ -689,6 +843,7 @@ function subjectsViewHtml() {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
           <span style="font-size:12px;color:var(--text-3);min-width:0;overflow-wrap:anywhere;">${footerText}</span>
           <div style="display:flex;gap:4px;flex-shrink:0;">
+            <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="openEditModal" data-subject-id="${esc(s.id)}" title="Редактировать предмет">${icon('edit', 15)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;${examPassed ? 'background:var(--good-soft);color:var(--good);' : ''}" data-action="toggleExam" data-subject-id="${esc(s.id)}" title="${examPassed ? 'Отменить: экзамен не сдан' : 'Закрыть предмет: экзамен сдан'}">${icon('cap', 16)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="deleteSubject" data-subject-id="${esc(s.id)}" title="Удалить предмет">${icon('trash', 15)}</button>
           </div>
@@ -716,6 +871,7 @@ function subjectsViewHtml() {
         <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--text-3);"></span>Нужно доделать</div>
       </div>
     </div>
+    ${examPanelHtml()}
     <div style="max-width:1240px;margin:0 auto;width:100%;padding:0 32px 56px;display:grid;grid-template-columns:repeat(auto-fill,minmax(346px,1fr));gap:20px;align-items:stretch;">
       ${subjectCards}
       <button class="dashed-add" style="padding:var(--card-pad);min-height:200px;" data-action="openAddModal">
@@ -820,17 +976,22 @@ function addModalHtml() {
     `<button class="tab-btn ${d.autoType === o.value ? 'active' : 'idle'}" style="flex:1;" data-action="setDraftAuto" data-auto="${o.value}">${o.label}</button>`
   ).join('');
 
+  const isEdit = !!state.editSubjectId;
+
   const tasksHtml = d.tasks.map(t => `
-    <div style="display:flex;gap:8px;align-items:center;">
-      <span style="display:flex;color:var(--text-3);flex-shrink:0;">${icon(t.type, 15)}</span>
-      <div style="position:relative;flex:1;display:flex;">
-        <select class="select-input" id="draft-type-${esc(t.id)}" data-input="taskType" data-task-id="${esc(t.id)}">
-          ${TASK_TYPES.map(o => `<option value="${o.type}" ${o.type === t.type ? 'selected' : ''}>${o.label}</option>`).join('')}
-        </select>
-        <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 15)}</span>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span style="display:flex;color:var(--text-3);flex-shrink:0;">${icon(t.type, 15)}</span>
+        <div style="position:relative;flex:1;display:flex;">
+          <select class="select-input" id="draft-type-${esc(t.id)}" data-input="taskType" data-task-id="${esc(t.id)}">
+            ${TASK_TYPES.map(o => `<option value="${o.type}" ${o.type === t.type ? 'selected' : ''}>${o.label}</option>`).join('')}
+          </select>
+          <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 15)}</span>
+        </div>
+        <input type="text" inputmode="numeric" id="draft-total-${esc(t.id)}" value="${esc(t.total)}" data-input="taskTotal" data-task-id="${esc(t.id)}" style="width:56px;text-align:center;padding:9px 8px;" class="text-input" />
+        ${canRemove ? `<button class="mini-icon-btn" data-action="removeDraftTask" data-task-id="${esc(t.id)}">${icon('trash', 15)}</button>` : ''}
       </div>
-      <input type="text" inputmode="numeric" id="draft-total-${esc(t.id)}" value="${esc(t.total)}" data-input="taskTotal" data-task-id="${esc(t.id)}" style="width:56px;text-align:center;padding:9px 8px;" class="text-input" />
-      ${canRemove ? `<button class="mini-icon-btn" data-action="removeDraftTask" data-task-id="${esc(t.id)}">${icon('trash', 15)}</button>` : ''}
+      ${t.type === 'custom' ? `<input type="text" id="draft-custom-${esc(t.id)}" class="text-input" placeholder="Название задания, напр. Коллоквиумы" value="${esc(t.customLabel || '')}" data-input="taskCustom" data-task-id="${esc(t.id)}" style="margin-left:23px;" />` : ''}
     </div>`).join('');
 
   const submitDisabled = d.name.trim().length === 0;
@@ -839,7 +1000,7 @@ function addModalHtml() {
   <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}">
     <div class="card scroll-y" style="border-radius:18px;padding:26px;width:460px;max-width:100%;max-height:86vh;display:flex;flex-direction:column;gap:22px;" data-stop="1">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Новый предмет</h2>
+        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">${isEdit ? 'Редактировать предмет' : 'Новый предмет'}</h2>
         <button class="close-btn" data-action="closeAddModal">${icon('x', 16)}</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px;">
@@ -855,6 +1016,17 @@ function addModalHtml() {
           <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Что даёт полное выполнение</span>
           <div style="display:flex;gap:3px;background:var(--surface-2);padding:3px;border-radius:11px;">${autoOpts}</div>
         </div>
+        ${EXAM_GROUPS.length && state.examGroup ? `
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Экзамен или зачёт · ${esc(examGroupTitle(state.examGroup))}</span>
+          <div style="position:relative;display:flex;">
+            <select class="select-input" data-input="examLink">
+              <option value="" ${!d.examLink ? 'selected' : ''}>— Не связано —</option>
+              ${currentExamList().map(e => `<option value="${esc(e.id)}" ${e.id === d.examLink ? 'selected' : ''}>${esc(e.name)} · ${examKindLabel(e.kind)}${e.date ? ' · ' + fmtExamDate(e.date) : ' · дата уточняется'}</option>`).join('')}
+            </select>
+            <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 15)}</span>
+          </div>
+        </div>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Задания</span>
@@ -863,7 +1035,7 @@ function addModalHtml() {
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
         <button class="ghost-btn" data-action="closeAddModal">Отмена</button>
-        <button class="primary-btn" data-action="submitDraft" ${submitDisabled ? 'disabled' : ''} style="opacity:${submitDisabled ? 0.5 : 1};">Добавить предмет</button>
+        <button class="primary-btn" data-action="submitDraft" ${submitDisabled ? 'disabled' : ''} style="opacity:${submitDisabled ? 0.5 : 1};">${isEdit ? 'Сохранить' : 'Добавить предмет'}</button>
       </div>
     </div>
   </div>`;
@@ -978,6 +1150,7 @@ const actions = {
   selectTheme: (el) => { rememberTheme(el.dataset.themeId); setState({ themeId: el.dataset.themeId, showThemeMenu: false }); },
 
   openSession: (el) => setUI({ navTab: 'main', view: 'subjects', currentSessionId: el.dataset.sessionId }),
+  toggleExamPanel: () => setUI({ examPanelOpen: !state.examPanelOpen }),
 
   prevWeek: () => setUI({ weekOffset: state.weekOffset - 1 }),
   nextWeek: () => setUI({ weekOffset: state.weekOffset + 1 }),
@@ -1085,9 +1258,31 @@ const actions = {
 
   openAddModal: () => setUI({
     showAddModal: true,
-    draft: { name: '', teacher: '', autoType: 'auto', tasks: [{ id: uid('d'), type: 'flask', total: 4 }] },
+    editSubjectId: null,
+    draft: { name: '', teacher: '', autoType: 'auto', examLink: '', tasks: [{ id: uid('d'), type: 'flask', total: 4 }] },
   }),
-  closeAddModal: () => setUI({ showAddModal: false }),
+  openEditModal: (el) => {
+    const sess = state.sessions.find(s => s.id === state.currentSessionId);
+    if (!sess) return;
+    const sub = sess.subjects.find(s => s.id === el.dataset.subjectId);
+    if (!sub) return;
+    setUI({
+      showAddModal: true,
+      editSubjectId: sub.id,
+      draft: {
+        name: sub.name,
+        teacher: sub.meta && sub.meta !== 'Преподаватель' ? sub.meta : '',
+        autoType: sub.autoType || 'auto',
+        examLink: sub.examLink || '',
+        tasks: sub.tasks.map(t => ({
+          id: uid('d'), type: t.type, total: String(t.total),
+          customLabel: t.type === 'custom' ? (t.label || '') : '',
+          origCompleted: Array.isArray(t.completed) ? t.completed.slice() : null,
+        })),
+      },
+    });
+  },
+  closeAddModal: () => setUI({ showAddModal: false, editSubjectId: null }),
   setDraftAuto: (el) => setUI({ draft: { ...state.draft, autoType: el.dataset.auto } }),
   addDraftTask: () => setUI({ draft: { ...state.draft, tasks: [...state.draft.tasks, { id: uid('d'), type: 'flask', total: 4 }] } }),
   removeDraftTask: (el) => setUI({ draft: { ...state.draft, tasks: state.draft.tasks.filter(t => t.id !== el.dataset.taskId) } }),
@@ -1095,18 +1290,34 @@ const actions = {
     const d = state.draft;
     if (!d.name.trim()) return;
     const sid = state.currentSessionId;
-    const tasks = d.tasks.filter(t => Number(t.total) > 0).map(t => ({
-      id: uid('t'), type: t.type, label: (TASK_TYPES.find(x => x.type === t.type) || {}).label || t.type,
-      total: Number(t.total), completed: mk(Number(t.total), 0),
-    }));
-    const subject = {
-      id: uid('subj'), name: d.name.trim(), meta: d.teacher.trim() || 'Преподаватель',
-      autoType: d.autoType || 'auto',
-      tasks: tasks.length ? tasks : [{ id: uid('t'), type: 'flask', label: 'Лабораторные', total: 4, completed: mk(4, 0) }],
-    };
+    const built = d.tasks.filter(t => Number(t.total) > 0).map(t => {
+      const total = Number(t.total);
+      const done = t.origCompleted ? Math.min(t.origCompleted.filter(Boolean).length, total) : 0;
+      const label = t.type === 'custom'
+        ? ((t.customLabel || '').trim() || 'Задание')
+        : ((TASK_TYPES.find(x => x.type === t.type) || {}).label || t.type);
+      return { id: uid('t'), type: t.type, label, total, completed: mk(total, done) };
+    });
+    const tasks = built.length ? built : [{ id: uid('t'), type: 'flask', label: 'Лабораторные', total: 4, completed: mk(4, 0) }];
     const sess = state.sessions.find(s => s.id === sid);
-    if (sess) sess.subjects.push(subject);
-    setState({ showAddModal: false });
+    if (!sess) return setState({ showAddModal: false, editSubjectId: null });
+    const examLink = d.examLink || null;
+    if (state.editSubjectId) {
+      const sub = sess.subjects.find(s => s.id === state.editSubjectId);
+      if (sub) {
+        sub.name = d.name.trim();
+        sub.meta = d.teacher.trim() || 'Преподаватель';
+        sub.autoType = d.autoType || 'auto';
+        sub.examLink = examLink;
+        sub.tasks = tasks;
+      }
+    } else {
+      sess.subjects.push({
+        id: uid('subj'), name: d.name.trim(), meta: d.teacher.trim() || 'Преподаватель',
+        autoType: d.autoType || 'auto', examLink, tasks,
+      });
+    }
+    setState({ showAddModal: false, editSubjectId: null });
   },
 
   downloadUpdate: () => {
@@ -1133,6 +1344,9 @@ const inputHandlers = {
   draftTeacher: (v) => { state.draft.teacher = v; },
   taskType: (v, el) => { const t = state.draft.tasks.find(t => t.id === el.dataset.taskId); if (t) { t.type = v; render(); } },
   taskTotal: (v, el) => { const t = state.draft.tasks.find(t => t.id === el.dataset.taskId); if (t) t.total = v.replace(/[^0-9]/g, ''); },
+  taskCustom: (v, el) => { const t = state.draft.tasks.find(t => t.id === el.dataset.taskId); if (t) t.customLabel = v; },
+  examLink: (v) => { state.draft.examLink = v; },
+  examGroupSelect: (v) => { setState({ examGroup: v || null }); },
   sessionName: (v) => { state.sessionDraft.name = v; updateSubmitState('sess-name'); },
   sessionPeriod: (v) => { state.sessionDraft.period = v; },
   oguDivision: (v) => { oguLoadCourses(Number(v), 2); },
@@ -1181,7 +1395,7 @@ root.addEventListener('change', (e) => {
   const el = e.target.closest('[data-input]');
   if (!el) return;
   const name = el.dataset.input;
-  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup'].includes(name)) {
+  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup', 'examLink', 'examGroupSelect'].includes(name)) {
     const h = inputHandlers[name];
     if (h) h(el.value, el);
   }
