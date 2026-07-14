@@ -40,9 +40,14 @@ function parseDt(v) {
 }
 
 function parseSummary(s) {
-  const m = /^(.*?)\s*\(([^)]*)\)\s*(.*)$/.exec(s || '');
-  if (m) return { name: m[1].trim(), type: m[2].trim(), teacher: m[3].trim() };
-  return { name: (s || '').trim(), type: '', teacher: '' };
+  const str = (s || '').trim();
+  const closeIdx = str.lastIndexOf(')');
+  if (closeIdx === -1) return { name: str, type: '', teacher: '' };
+  const name = str.slice(0, closeIdx + 1).trim();
+  const teacher = str.slice(closeIdx + 1).trim();
+  const parens = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+  const type = parens.find((p) => /лек|практ|сем|лаб|дист/i.test(p)) || parens[0] || '';
+  return { name, type: type.trim(), teacher };
 }
 
 function parseIcs(text) {

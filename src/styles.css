@@ -63,9 +63,10 @@ input,select,textarea{font-family:inherit;}
 .icon-btn:hover{border-color:var(--border-strong);color:var(--text);}
 
 .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;}
-.session-card{text-align:left;padding:22px;display:flex;flex-direction:column;gap:16px;cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s;}
+.session-card{text-align:left;padding:22px;display:flex;flex-direction:column;gap:15px;cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s;}
 .session-card:hover{border-color:var(--border-strong);transform:translateY(-2px);box-shadow:0 8px 20px rgba(20,16,12,.10);}
 .session-card:active{transform:translateY(0);box-shadow:none;}
+.session-card:hover .session-open{color:var(--accent);}
 
 .dashed-add{background:transparent;border:1.5px dashed var(--border-strong);border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;cursor:pointer;color:var(--text-3);transition:border-color .15s,color .15s,background-color .15s,transform .15s;}
 .dashed-add:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);transform:translateY(-1px);}
@@ -131,7 +132,7 @@ body{transition:background-color .25s ease;}
   .modal-overlay.anim-in .card{animation:modal-pop-in .24s cubic-bezier(.2,.7,.3,1) both;}
   .dropdown-in{animation:dropdown-pop-in .16s cubic-bezier(.2,.7,.3,1) both;}
   .seg-pop{animation:seg-pop .32s cubic-bezier(.34,1.4,.4,1) both;}
-  .update-toast{animation:toast-slide-in .3s cubic-bezier(.2,.7,.3,1) both;}
+  .update-toast,.app-toast{animation:toast-slide-in .3s cubic-bezier(.2,.7,.3,1) both;}
 }
 @keyframes view-fade-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
 @keyframes overlay-fade-in{from{opacity:0;}to{opacity:1;}}

@@ -92,9 +92,13 @@ const state = {
   examGroup: EXAM_GROUPS[0] ? EXAM_GROUPS[0].id : null,
   userExams: {},
   hiddenExams: [],
+  remindersSeen: {},
+  examReminders: null,
+  undo: null,
   showExamModal: false,
   examDraft: { name: '', kind: 'exam', date: '', dateUnknown: false },
   showSessionModal: false,
+  editSessionId: null,
   showLessonModal: false,
   lessonEdit: null,
   lessonDraft: null,
@@ -112,7 +116,7 @@ const state = {
   update: null,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams', 'remindersSeen'];
 
 function collectPersist() {
   const out = {};
@@ -141,6 +145,7 @@ async function loadPersisted() {
       if (typeof data.examGroup === 'string' && EXAM_SCHEDULES[data.examGroup]) state.examGroup = data.examGroup;
       if (data.userExams && typeof data.userExams === 'object' && !Array.isArray(data.userExams)) state.userExams = data.userExams;
       if (Array.isArray(data.hiddenExams)) state.hiddenExams = data.hiddenExams;
+      if (data.remindersSeen && typeof data.remindersSeen === 'object' && !Array.isArray(data.remindersSeen)) state.remindersSeen = data.remindersSeen;
     }
     rememberTheme(state.themeId);
   } catch (e) {
@@ -209,6 +214,7 @@ function icon(name, size) {
     cap: '<path d="M12 5L2.5 9 12 13l9.5-4L12 5z"/><path d="M6.5 11v4.2c0 1.2 2.5 2.3 5.5 2.3s5.5-1.1 5.5-2.3V11"/><path d="M21.5 9v4.5"/>',
     refresh: '<path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/>',
     download: '<path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M5 19.5h14"/>',
+    bell: '<path d="M6 9a6 6 0 0 1 12 0c0 5 1.5 6.5 2 7H4c.5-.5 2-2 2-7z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 19a5.5 5.5 0 0 0-3-4.9"/>',
   };
   return open + (P[name] || P.plus) + '</svg>';
@@ -273,6 +279,33 @@ function daysUntilText(dateStr) {
   return 'через ' + n + ' ' + plural(n, ['день', 'дня', 'дней']);
 }
 const examKindLabel = (kind) => kind === 'exam' ? 'Экзамен' : 'Зачёт';
+
+const REMINDER_MILESTONES = [7, 3, 1, 0];
+// Наименьший рубеж, в который «попал» экзамен: n=5 → 7, n=2 → 3, n=0 → 0, n>7 → null.
+function currentMilestone(n) {
+  if (n === null || n < 0) return null;
+  const sorted = [...REMINDER_MILESTONES].sort((a, b) => a - b);
+  for (const m of sorted) if (n <= m) return m;
+  return null;
+}
+// Экзамены выбранной группы с известной датой, у которых наступил новый рубеж напоминания.
+function computeExamReminders() {
+  const g = state.examGroup;
+  if (!g) return [];
+  const seen = state.remindersSeen || {};
+  const due = [];
+  for (const e of groupExamList(g)) {
+    if (!e.date) continue;
+    const n = daysUntil(e.date);
+    const m = currentMilestone(n);
+    if (m === null) continue;
+    const key = e.id + ':' + m;
+    if (seen[key]) continue;
+    due.push({ id: e.id, name: e.name, kind: e.kind, n, date: e.date, key });
+  }
+  due.sort((a, b) => a.n - b.n);
+  return due;
+}
 
 const root = document.getElementById('root');
 
@@ -364,6 +397,20 @@ function askConfirm(opts, cb) {
   setUI({ confirmDialog: opts });
 }
 
+let undoRestore = null;
+let undoTimer = null;
+const UNDO_MS = 6000;
+// Удаляет сразу и показывает плашку «Отменить» на несколько секунд.
+function offerUndo(message, restoreFn) {
+  undoRestore = restoreFn;
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => {
+    undoRestore = null;
+    if (state.undo) setUI({ undo: null });
+  }, UNDO_MS);
+  setUI({ undo: { message } });
+}
+
 function template() {
   const density = 'comfortable';
   const overrideStyle = `--card-pad:22px;--card-gap:18px;`;
@@ -382,7 +429,7 @@ function template() {
     ${state.showImportModal ? importModalHtml() : ''}
     ${state.confirmDialog ? confirmModalHtml() : ''}
     ${state.update && state.update.status === 'available' ? updateModalHtml() : ''}
-    ${state.update ? updateToastHtml() : ''}
+    ${toastStackHtml()}
     ${versionBadgeHtml()}
   </div>
   </div>`;
@@ -455,6 +502,20 @@ function updateModalHtml() {
   </div>`;
 }
 
+// Единый стек тостов в правом нижнем углу — элементы идут столбиком и не наезжают друг на друга.
+function toastStackHtml() {
+  const parts = [
+    state.examReminders && state.examReminders.length ? examReminderToastHtml() : '',
+    state.update ? updateToastHtml() : '',
+    state.undo ? undoToastHtml() : '',
+  ].filter(Boolean);
+  if (!parts.length) return '';
+  return `
+  <div style="position:fixed;right:24px;bottom:24px;z-index:210;display:flex;flex-direction:column;gap:12px;align-items:flex-end;width:360px;max-width:calc(100vw - 48px);pointer-events:none;">
+    ${parts.join('')}
+  </div>`;
+}
+
 function updateToastHtml() {
   const u = state.update;
   if (!u || (u.status !== 'downloading' && u.status !== 'ready')) return '';
@@ -488,13 +549,53 @@ function updateToastHtml() {
     : '';
 
   return `
-  <div class="update-toast" style="position:fixed;right:24px;bottom:24px;z-index:200;width:340px;max-width:calc(100vw - 48px);">
+  <div class="update-toast" style="width:100%;pointer-events:auto;">
     <div class="card" style="border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;box-shadow:0 14px 40px rgba(20,16,12,.22);">
       <div style="display:flex;align-items:${ready ? 'center' : 'flex-start'};gap:12px;">
         ${iconWrap}
         ${bodyHtml}
       </div>
       ${footer}
+    </div>
+  </div>`;
+}
+
+function undoToastHtml() {
+  const u = state.undo;
+  if (!u) return '';
+  return `
+  <div class="app-toast" style="max-width:100%;pointer-events:auto;">
+    <div class="card" style="border-radius:14px;padding:10px 12px 10px 16px;display:flex;align-items:center;gap:12px;overflow:hidden;box-shadow:0 14px 40px rgba(20,16,12,.22);">
+      <span style="font-size:13.5px;color:var(--text);white-space:nowrap;">${esc(u.message)}</span>
+      <button class="ghost-btn" style="padding:7px 14px;font-size:13px;flex-shrink:0;" data-action="undoDelete">Отменить</button>
+      <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="dismissUndo" title="Закрыть">${icon('x', 14)}</button>
+    </div>
+  </div>`;
+}
+
+function examReminderToastHtml() {
+  const list = state.examReminders || [];
+  if (!list.length) return '';
+  const rows = list.map((r) => `
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);">${icon(r.kind === 'exam' ? 'cap' : 'clipboard', 15)}</span>
+      <div style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;">
+        <span style="font-size:13.5px;font-weight:500;color:var(--text);overflow-wrap:anywhere;">${esc(r.name)}</span>
+        <span style="font-size:12px;color:var(--text-3);">${examKindLabel(r.kind)} · ${fmtExamDate(r.date)}</span>
+      </div>
+      <span style="font-size:12.5px;font-weight:600;color:${r.n <= 1 ? 'var(--accent-2)' : 'var(--text-2)'};white-space:nowrap;flex-shrink:0;">${daysUntilText(r.date)}</span>
+    </div>`).join('<div style="height:1px;background:var(--border);margin:2px 0;"></div>');
+  const title = list.length === 1 ? 'Скоро экзамен' : 'Скоро экзамены';
+  return `
+  <div class="app-toast" style="width:100%;pointer-events:auto;">
+    <div class="card" style="border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;overflow:hidden;box-shadow:0 14px 40px rgba(20,16,12,.22);">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="display:flex;color:var(--accent-2);flex-shrink:0;">${icon('bell', 18)}</span>
+        <span style="font-family:'Onest';font-weight:600;font-size:14.5px;color:var(--text);letter-spacing:-.01em;flex:1;">${title}</span>
+        <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="dismissReminders" title="Закрыть">${icon('x', 14)}</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;">${rows}</div>
+      <button class="primary-btn" style="padding:9px 16px;font-size:13px;align-self:flex-end;" data-action="dismissReminders">Понятно</button>
     </div>
   </div>`;
 }
@@ -660,33 +761,52 @@ function sessionsViewHtml() {
       ? count + ' ' + plural(count, ['предмет', 'предмета', 'предметов']) + ' · ' + autos + ' ' + plural(autos, ['закрыт', 'закрыто', 'закрыто'])
       : 'Нет предметов';
     const isDone = sess.subjects.length > 0 && sess.subjects.every(su => subjectClosed(su));
+    const ringColor = isDone ? 'var(--good)' : 'var(--accent)';
     const badge = isDone
       ? `<div style="display:flex;align-items:center;gap:5px;padding:5px 10px 5px 8px;border-radius:99px;background:var(--good-soft);color:var(--good);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;">${icon('check', 13)}Завершена</div>`
       : `<div style="display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;background:var(--accent-soft);color:var(--accent-2);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);"></span>Текущая</div>`;
 
+    const MAX_DOTS = 16;
+    const dotColor = (su) => subjectClosed(su) ? 'var(--good)' : (subjectPct(su) > 0 ? 'var(--accent)' : 'var(--border-strong)');
+    const dotsHtml = count
+      ? `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-height:8px;">
+          ${sess.subjects.slice(0, MAX_DOTS).map(su => `<span style="width:8px;height:8px;border-radius:50%;background:${dotColor(su)};" title="${esc(su.name)}"></span>`).join('')}
+          ${count > MAX_DOTS ? `<span style="font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:2px;">+${count - MAX_DOTS}</span>` : ''}
+        </div>`
+      : `<div style="min-height:8px;font-size:12px;color:var(--text-3);">Пока нет предметов</div>`;
+
+    const ring = `
+      <div style="width:66px;height:66px;border-radius:50%;flex-shrink:0;background:conic-gradient(${ringColor} ${pct * 3.6}deg, var(--surface-2) 0deg);display:flex;align-items:center;justify-content:center;">
+        <div style="width:52px;height:52px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
+          <span style="display:flex;align-items:baseline;gap:1px;">
+            <span style="font-family:'Golos Text';font-weight:700;font-size:16px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;">${pct}</span>
+            <span style="font-size:9px;font-weight:600;color:var(--text-3);">%</span>
+          </span>
+        </div>
+      </div>`;
+
     return `
     <div class="card session-card" data-action="openSession" data-session-id="${esc(sess.id)}" role="button" tabindex="0">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-        <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
-          <span style="font-family:'Onest';font-weight:600;font-size:19px;letter-spacing:-.015em;color:var(--text);">${esc(sess.name)}</span>
-          <span style="font-size:12.5px;color:var(--text-3);">${esc(sess.period)}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-          ${badge}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        ${badge}
+        <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
+          <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="openEditSessionModal" data-session-id="${esc(sess.id)}" title="Редактировать семестр">${icon('edit', 14)}</button>
           <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="deleteSession" data-session-id="${esc(sess.id)}" title="Удалить семестр">${icon('trash', 14)}</button>
         </div>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;">
+        <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
+          <span style="font-family:'Onest';font-weight:600;font-size:20px;letter-spacing:-.02em;color:var(--text);line-height:1.15;overflow-wrap:anywhere;">${esc(sess.name)}</span>
+          <span style="font-size:12.5px;color:var(--text-3);">${esc(sess.period)}</span>
+        </div>
+        ${ring}
+      </div>
+      ${dotsHtml}
       <div style="display:flex;flex-direction:column;gap:11px;margin-top:auto;">
         <div style="height:1px;background:var(--border);"></div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div style="flex:1;height:7px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
-            <div style="height:100%;border-radius:99px;transition:width .4s cubic-bezier(.2,.7,.3,1);background:${isDone ? 'var(--good)' : 'var(--accent)'};width:${pct}%;"></div>
-          </div>
-          <span style="font-family:'Golos Text';font-size:12.5px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;min-width:34px;text-align:right;">${pct}%</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
           <span style="font-size:12.5px;color:var(--text-2);">${statsText}</span>
-          <span style="display:flex;color:var(--text-3);">${icon('chevron-right', 16)}</span>
+          <span class="session-open" style="display:flex;align-items:center;gap:3px;font-size:12.5px;font-weight:600;color:var(--text-3);white-space:nowrap;transition:color .15s;">Открыть${icon('chevron-right', 15)}</span>
         </div>
       </div>
     </div>`;
@@ -1067,11 +1187,12 @@ function addModalHtml() {
 function sessionModalHtml() {
   const d = state.sessionDraft;
   const submitDisabled = d.name.trim().length === 0;
+  const isEdit = !!state.editSessionId;
   return `
   <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}">
     <div class="card" style="border-radius:18px;padding:26px;width:420px;max-width:100%;display:flex;flex-direction:column;gap:22px;" data-stop="1">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Новая сессия</h2>
+        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">${isEdit ? 'Редактировать семестр' : 'Новая сессия'}</h2>
         <button class="close-btn" data-action="closeSessionModal">${icon('x', 16)}</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px;">
@@ -1086,7 +1207,7 @@ function sessionModalHtml() {
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px;">
         <button class="ghost-btn" data-action="closeSessionModal">Отмена</button>
-        <button class="primary-btn" data-action="submitSession" ${submitDisabled ? 'disabled' : ''} style="opacity:${submitDisabled ? 0.5 : 1};">Создать сессию</button>
+        <button class="primary-btn" data-action="submitSession" ${submitDisabled ? 'disabled' : ''} style="opacity:${submitDisabled ? 0.5 : 1};">${isEdit ? 'Сохранить' : 'Создать сессию'}</button>
       </div>
     </div>
   </div>`;
@@ -1240,11 +1361,14 @@ const actions = {
   deleteSubject: (el) => {
     const sess = state.sessions.find(s => s.id === state.currentSessionId);
     if (!sess) return;
-    const sub = sess.subjects.find(s => s.id === el.dataset.subjectId);
-    if (!sub) return;
-    askConfirm({ title: 'Удалить предмет?', message: `«${sub.name}» и весь прогресс по нему будут удалены.`, confirmLabel: 'Удалить' }, () => {
-      sess.subjects = sess.subjects.filter(s => s.id !== el.dataset.subjectId);
-      setState({});
+    const idx = sess.subjects.findIndex(s => s.id === el.dataset.subjectId);
+    if (idx === -1) return;
+    const [removed] = sess.subjects.splice(idx, 1);
+    const sid = sess.id;
+    setState({});
+    offerUndo(`Предмет «${removed.name}» удалён`, () => {
+      const s = state.sessions.find(x => x.id === sid);
+      if (s) s.subjects.splice(Math.min(idx, s.subjects.length), 0, removed);
     });
   },
 
@@ -1262,14 +1386,25 @@ const actions = {
 
   deleteSession: (el) => {
     const id = el.dataset.sessionId;
-    const sess = state.sessions.find(s => s.id === id);
-    if (!sess) return;
-    askConfirm({ title: 'Удалить семестр?', message: `«${sess.name}» и все его предметы будут удалены безвозвратно.`, confirmLabel: 'Удалить' }, () => {
-      state.sessions = state.sessions.filter(s => s.id !== id);
-      if (state.currentSessionId === id) { state.view = 'sessions'; state.currentSessionId = null; }
-      setState({});
+    const idx = state.sessions.findIndex(s => s.id === id);
+    if (idx === -1) return;
+    const [removed] = state.sessions.splice(idx, 1);
+    if (state.currentSessionId === id) { state.view = 'sessions'; state.currentSessionId = null; }
+    setState({});
+    offerUndo(`Семестр «${removed.name}» удалён`, () => {
+      state.sessions.splice(Math.min(idx, state.sessions.length), 0, removed);
     });
   },
+
+  undoDelete: () => {
+    const fn = undoRestore;
+    undoRestore = null;
+    clearTimeout(undoTimer);
+    if (fn) fn();
+    setState({ undo: null });
+  },
+  dismissUndo: () => { undoRestore = null; clearTimeout(undoTimer); setUI({ undo: null }); },
+  dismissReminders: () => setUI({ examReminders: null }),
 
   confirmYes: () => {
     const cb = confirmCb;
@@ -1392,13 +1527,27 @@ const actions = {
   installUpdate: () => { if (window.adelon && window.adelon.update) window.adelon.update.install(); },
   dismissUpdate: () => setUI({ update: null }),
 
-  openSessionModal: () => setUI({ showSessionModal: true, sessionDraft: { name: '', period: '' } }),
-  closeSessionModal: () => setUI({ showSessionModal: false }),
+  openSessionModal: () => setUI({ showSessionModal: true, editSessionId: null, sessionDraft: { name: '', period: '' } }),
+  openEditSessionModal: (el) => {
+    const sess = state.sessions.find(s => s.id === el.dataset.sessionId);
+    if (!sess) return;
+    setUI({
+      showSessionModal: true,
+      editSessionId: sess.id,
+      sessionDraft: { name: sess.name, period: sess.period && sess.period !== 'Без периода' ? sess.period : '' },
+    });
+  },
+  closeSessionModal: () => setUI({ showSessionModal: false, editSessionId: null }),
   submitSession: () => {
     const d = state.sessionDraft;
     if (!d.name.trim()) return;
-    state.sessions.unshift({ id: uid('sess'), name: d.name.trim(), period: d.period.trim() || 'Без периода', subjects: [] });
-    setState({ showSessionModal: false });
+    if (state.editSessionId) {
+      const sess = state.sessions.find(s => s.id === state.editSessionId);
+      if (sess) { sess.name = d.name.trim(); sess.period = d.period.trim() || 'Без периода'; }
+    } else {
+      state.sessions.unshift({ id: uid('sess'), name: d.name.trim(), period: d.period.trim() || 'Без периода', subjects: [] });
+    }
+    setState({ showSessionModal: false, editSessionId: null });
   },
 
   openExamModal: () => {
@@ -1434,17 +1583,24 @@ const actions = {
     const g = state.examGroup;
     if (!id || !g) return;
     const userArr = (state.userExams && state.userExams[g]) || [];
-    const isUser = userArr.some(e => e.id === id);
+    const userIdx = userArr.findIndex(e => e.id === id);
     const item = currentExamList().find(e => e.id === id);
     const label = item ? item.name : 'запись';
-    askConfirm({ title: 'Удалить из списка?', message: `«${label}» пропадёт из твоего списка экзаменов и зачётов.`, confirmLabel: 'Удалить' }, () => {
-      if (isUser) {
-        state.userExams[g] = userArr.filter(e => e.id !== id);
-      } else if (!state.hiddenExams.includes(id)) {
-        state.hiddenExams = [...state.hiddenExams, id];
-      }
+    if (userIdx !== -1) {
+      const [removed] = userArr.splice(userIdx, 1);
+      state.userExams[g] = userArr;
       setState({});
-    });
+      offerUndo(`«${label}» удалён`, () => {
+        if (!state.userExams[g]) state.userExams[g] = [];
+        state.userExams[g].splice(Math.min(userIdx, state.userExams[g].length), 0, removed);
+      });
+    } else {
+      if (!state.hiddenExams.includes(id)) state.hiddenExams = [...state.hiddenExams, id];
+      setState({});
+      offerUndo(`«${label}» скрыт`, () => {
+        state.hiddenExams = (state.hiddenExams || []).filter(x => x !== id);
+      });
+    }
   },
 
 };
@@ -1516,7 +1672,9 @@ root.addEventListener('change', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (state.confirmDialog) actions.confirmNo();
+    if (state.examReminders && state.examReminders.length) actions.dismissReminders();
+    else if (state.undo) actions.dismissUndo();
+    else if (state.confirmDialog) actions.confirmNo();
     else if (state.showAddModal) actions.closeAddModal();
     else if (state.showSessionModal) actions.closeSessionModal();
     else if (state.showExamModal) actions.closeExamModal();
@@ -1536,6 +1694,16 @@ function hideSplash() {
 (async function boot() {
   const startedAt = Date.now();
   await loadPersisted();
+
+  const dueReminders = computeExamReminders();
+  if (dueReminders.length) {
+    const seen = { ...(state.remindersSeen || {}) };
+    dueReminders.forEach(d => { seen[d.key] = true; });
+    state.remindersSeen = seen;
+    state.examReminders = dueReminders;
+    save();
+  }
+
   render();
 
   if (window.adelon && window.adelon.update) {
