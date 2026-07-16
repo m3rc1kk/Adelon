@@ -83,7 +83,7 @@ const DEFAULT_THEME = 'warm-dark';
 const state = {
   themeId: DEFAULT_THEME,
   showThemeMenu: false,
-  navTab: 'main',
+  navTab: 'dashboard',
   view: 'sessions',
   currentSessionId: null,
   showAddModal: false,
@@ -92,6 +92,7 @@ const state = {
   examGroup: EXAM_GROUPS[0] ? EXAM_GROUPS[0].id : null,
   userExams: {},
   hiddenExams: [],
+  activity: {},
   remindersSeen: {},
   examReminders: null,
   undo: null,
@@ -116,7 +117,7 @@ const state = {
   update: null,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams', 'remindersSeen'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams', 'activity', 'remindersSeen'];
 
 function collectPersist() {
   const out = {};
@@ -145,6 +146,7 @@ async function loadPersisted() {
       if (typeof data.examGroup === 'string' && EXAM_SCHEDULES[data.examGroup]) state.examGroup = data.examGroup;
       if (data.userExams && typeof data.userExams === 'object' && !Array.isArray(data.userExams)) state.userExams = data.userExams;
       if (Array.isArray(data.hiddenExams)) state.hiddenExams = data.hiddenExams;
+      if (data.activity && typeof data.activity === 'object' && !Array.isArray(data.activity)) state.activity = data.activity;
       if (data.remindersSeen && typeof data.remindersSeen === 'object' && !Array.isArray(data.remindersSeen)) state.remindersSeen = data.remindersSeen;
     }
     rememberTheme(state.themeId);
@@ -190,6 +192,14 @@ function subjectUnits(sub) {
   return { done, total: total || 1 };
 }
 
+// Отмечает активность за сегодня для тепловой карты (delta +1 при отметке, −1 при снятии).
+function bumpActivity(delta) {
+  const key = dateKey(new Date());
+  const a = state.activity || (state.activity = {});
+  const v = (a[key] || 0) + delta;
+  if (v > 0) a[key] = v; else delete a[key];
+}
+
 function icon(name, size) {
   size = size || 16;
   const open = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">`;
@@ -216,6 +226,10 @@ function icon(name, size) {
     download: '<path d="M12 4v10"/><path d="M8 10.5l4 4 4-4"/><path d="M5 19.5h14"/>',
     bell: '<path d="M6 9a6 6 0 0 1 12 0c0 5 1.5 6.5 2 7H4c.5-.5 2-2 2-7z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     users: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 19a5.5 5.5 0 0 0-3-4.9"/>',
+    flame: '<path d="M12 3c2.4 3 4.2 4.9 4.2 8.2a4.2 4.2 0 0 1-8.4 0c0-1.4.6-2.6 1.5-3.6.1 1.2.8 1.9 1.5 2.3C10.6 7.8 10 5.9 12 3z"/>',
+    grid: '<rect x="4" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="4" y="13.8" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="13.8" width="6.2" height="6.2" rx="1.6"/>',
+    alert: '<path d="M12 4.5l8 14.5H4L12 4.5z"/><path d="M12 10.5v4"/><path d="M12 17.5h.01"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
   };
   return open + (P[name] || P.plus) + '</svg>';
 }
@@ -420,6 +434,7 @@ function template() {
   <div style="min-height:100vh;background:var(--bg);color:var(--text);font-family:'Golos Text',system-ui,sans-serif;-webkit-font-smoothing:antialiased;" data-theme="${state.themeId}">
   <div style="${overrideStyle}">
     ${headerHtml(isMain)}
+    ${state.navTab === 'dashboard' ? dashboardViewHtml() : ''}
     ${isMain && state.view === 'sessions' ? sessionsViewHtml() : ''}
     ${isMain && state.view === 'subjects' ? subjectsViewHtml() : ''}
     ${state.navTab === 'schedule' ? scheduleViewHtml() : ''}
@@ -564,11 +579,11 @@ function undoToastHtml() {
   const u = state.undo;
   if (!u) return '';
   return `
-  <div class="app-toast" style="max-width:100%;pointer-events:auto;">
-    <div class="card" style="border-radius:14px;padding:10px 12px 10px 16px;display:flex;align-items:center;gap:12px;overflow:hidden;box-shadow:0 14px 40px rgba(20,16,12,.22);">
-      <span style="font-size:13.5px;color:var(--text);white-space:nowrap;">${esc(u.message)}</span>
+  <div class="app-toast" style="width:100%;pointer-events:auto;">
+    <div class="card" style="border-radius:14px;padding:10px 12px 10px 16px;display:flex;align-items:center;gap:10px;overflow:hidden;box-shadow:0 14px 40px rgba(20,16,12,.22);">
+      <span style="font-size:13.5px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(u.message)}</span>
       <button class="ghost-btn" style="padding:7px 14px;font-size:13px;flex-shrink:0;" data-action="undoDelete">Отменить</button>
-      <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="dismissUndo" title="Закрыть">${icon('x', 14)}</button>
+      <button class="mini-icon-btn" style="width:28px;height:28px;flex-shrink:0;" data-action="dismissUndo" title="Закрыть">${icon('x', 14)}</button>
     </div>
   </div>`;
 }
@@ -736,6 +751,7 @@ function headerHtml(isMain) {
         <span style="font-family:'Onest';font-weight:600;font-size:19px;letter-spacing:-.02em;color:var(--text);">Adelon</span>
       </div>
       <div style="display:flex;gap:3px;background:var(--surface-2);padding:3px;border-radius:11px;margin-left:8px;">
+        <button class="tab-btn ${state.navTab === 'dashboard' ? 'active' : 'idle'}" data-action="goDashboard">Обзор</button>
         <button class="tab-btn ${isMain ? 'active' : 'idle'}" data-action="goSessionsTab">Сессии</button>
         <button class="tab-btn ${state.navTab === 'schedule' ? 'active' : 'idle'}" data-action="goSchedule">Расписание</button>
       </div>
@@ -750,6 +766,342 @@ function headerHtml(isMain) {
   </div>`;
 }
 
+// Сплошная conic-заливка кольца прогресса.
+function ringFill(pct, done) {
+  const deg = Math.max(0, Math.min(360, pct * 3.6));
+  const base = done ? 'var(--good)' : 'var(--accent)';
+  return `conic-gradient(${base} ${deg}deg, var(--surface-2) ${deg}deg)`;
+}
+
+// «Обзор» — карточный дашборд: прогресс, серия/итоги, тепловая карта активности,
+// требуют внимания, ближайшие экзамены, по типам заданий, семестры.
+function dashboardViewHtml() {
+  const sessions = state.sessions;
+  const subjects = sessions.flatMap(s => s.subjects);
+  const total = subjects.length;
+
+  const headerBlock = (subtitle) => `
+    <div style="max-width:1240px;margin:0 auto;width:100%;padding:34px 32px 20px;">
+      <h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0;">Обзор</h1>
+      <p style="margin:9px 0 0;font-size:14px;color:var(--text-2);">${subtitle}</p>
+    </div>`;
+
+  if (!total) {
+    return `
+    <div class="${animMainEnter ? 'view-enter' : ''}">
+      ${headerBlock('Здесь появится статистика, как только добавишь семестры и предметы.')}
+      <div style="max-width:1240px;margin:0 auto;width:100%;padding:8px 32px 56px;">
+        <button class="dashed-add" style="padding:44px 22px;min-height:200px;width:100%;" data-action="goSessionsTab">
+          <span style="display:flex;" aria-hidden="true">${icon('plus', 26)}</span>
+          <span style="font-family:'Onest';font-weight:600;font-size:16px;">Перейти к семестрам</span>
+          <span style="font-size:13px;color:var(--text-3);max-width:380px;text-align:center;">Создай семестр и добавь предметы — тут появятся прогресс, тепловая карта активности и ближайшие экзамены.</span>
+        </button>
+      </div>
+    </div>`;
+  }
+
+  // Готовность по заданиям + разбивка по типам (закрытый экзамен = всё сдано).
+  let doneU = 0, totalU = 0, closedCount = 0;
+  const typeAgg = {};
+  for (const su of subjects) {
+    if (subjectClosed(su)) closedCount++;
+    for (const t of su.tasks) {
+      const dn = su.examPassed ? t.total : taskDone(t);
+      doneU += dn; totalU += t.total;
+      const key = t.type || 'custom';
+      (typeAgg[key] = typeAgg[key] || { done: 0, total: 0 });
+      typeAgg[key].done += dn; typeAgg[key].total += t.total;
+    }
+  }
+  const overallPct = totalU ? Math.round(doneU / totalU * 100) : 0;
+  const allClosed = closedCount === total;
+
+  const streak = activityStreak();
+  const best = activityBestStreak();
+  const week = activitySince(7);
+  const month = activitySince(30);
+
+  const upcoming = currentExamList()
+    .filter(e => e.date && daysUntil(e.date) !== null && daysUntil(e.date) >= 0)
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+  const collator = new Intl.Collator('ru');
+  const attn = sessions.flatMap(s => s.subjects.map(su => ({
+    name: su.name, sessName: s.name, sessId: s.id, pct: subjectPct(su), closed: subjectClosed(su),
+  }))).filter(r => !r.closed).sort((a, b) => a.pct - b.pct || collator.compare(a.name, b.name));
+
+  // ── Плитка-герой: общий прогресс ──
+  const heroDots = subjects.map(su => {
+    const c = subjectClosed(su) ? 'var(--good)' : (subjectPct(su) > 0 ? 'var(--accent)' : 'var(--border-strong)');
+    return `<span style="width:9px;height:9px;border-radius:50%;background:${c};" title="${esc(su.name)} — ${subjectClosed(su) ? 'закрыт' : subjectPct(su) + '%'}"></span>`;
+  }).join('');
+  const progStat = (val, label) => `
+    <div style="display:flex;flex-direction:column;gap:3px;align-items:center;flex:1;">
+      <span style="font-family:'Golos Text';font-weight:700;font-size:19px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;">${val}</span>
+      <span style="font-size:11px;color:var(--text-3);white-space:nowrap;">${label}</span>
+    </div>`;
+  const progressCard = `
+    <div class="card ov-card b-prog" style="align-items:center;justify-content:space-between;text-align:center;gap:18px;padding:26px 24px;">
+      <span class="ov-eyebrow">Готовность семестра</span>
+      <div style="position:relative;width:168px;height:168px;flex-shrink:0;border-radius:50%;background:${ringFill(overallPct, allClosed)};display:flex;align-items:center;justify-content:center;">
+        <div style="width:132px;height:132px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
+          <span style="display:flex;align-items:baseline;gap:2px;">
+            <span style="font-family:'Golos Text';font-weight:700;font-size:48px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em;">${overallPct}</span>
+            <span style="font-size:20px;font-weight:600;color:var(--text-3);">%</span>
+          </span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:stretch;gap:4px;width:100%;">
+        ${progStat(`${doneU}/${totalU}`, 'задания')}
+        <div style="width:1px;background:var(--border);margin:2px 0;"></div>
+        ${progStat(`${closedCount}/${total}`, 'закрыто')}
+        <div style="width:1px;background:var(--border);margin:2px 0;"></div>
+        ${progStat(sessions.length, plural(sessions.length, ['семестр', 'семестра', 'семестров']))}
+      </div>
+      <div style="width:100%;display:flex;flex-direction:column;gap:9px;">
+        <div style="height:1px;background:var(--border);"></div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;">${heroDots}</div>
+      </div>
+    </div>`;
+
+  // ── Мини-плитки: серия + итоги ──
+  const streakLabel = streak > 0
+    ? `${plural(streak, ['день', 'дня', 'дней'])} подряд${best > streak ? ` · рекорд ${best}` : ''}`
+    : 'пока нет серии';
+  const streakTile = `
+    <div class="card ov-mini b-streak">
+      <span class="cap"><span class="ic" aria-hidden="true">${icon('flame', 15)}</span>Серия активности</span>
+      <span class="n">${streak}</span>
+      <span class="l">${streakLabel}</span>
+    </div>`;
+  const doneTile = `
+    <div class="card ov-mini b-done">
+      <span class="cap"><span class="ic" aria-hidden="true">${icon('check', 15)}</span>Сделано</span>
+      <span class="n">${week}</span>
+      <span class="l">за неделю · ${month} за месяц</span>
+    </div>`;
+
+  // ── Тепловая карта активности ──
+  const heatmap = activityHeatmapHtml('b-heat');
+
+  // ── Требуют внимания ──
+  const attnRows = attn.slice(0, 5).map(r => `
+    <button class="ov-row" data-action="openSession" data-session-id="${esc(r.sessId)}" aria-label="Открыть ${esc(r.name)}, ${r.pct}%">
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;align-items:baseline;gap:8px;">
+          <span style="font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;">${esc(r.name)}</span>
+          <span style="font-size:11px;color:var(--text-3);white-space:nowrap;flex-shrink:0;">${esc(r.sessName)}</span>
+          <span style="font-size:12.5px;font-weight:700;color:var(--text-2);font-variant-numeric:tabular-nums;flex-shrink:0;">${r.pct}%</span>
+        </div>
+        <div style="height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
+          <div style="height:100%;border-radius:99px;background:var(--accent);width:${r.pct}%;"></div>
+        </div>
+      </div>
+    </button>`).join('');
+  const attnCard = `
+    <div class="card ov-card b-attn">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('alert', 16)}</span><span class="ov-card-title">Требуют внимания</span>${attn.length ? `<span class="ov-card-count">${attn.length}</span>` : ''}</div>
+      ${attn.length
+        ? `<div style="display:flex;flex-direction:column;gap:2px;">${attnRows}</div>`
+        : `<div style="display:flex;align-items:center;gap:9px;color:var(--good);font-size:13.5px;font-weight:600;"><span style="display:flex;" aria-hidden="true">${icon('check', 17)}</span>Все предметы закрыты</div>`}
+    </div>`;
+
+  // ── Ближайшие экзамены ──
+  const examRows = upcoming.slice(0, 5).map((e, i) => {
+    const n = daysUntil(e.date);
+    const soon = n <= 3;
+    return `
+    <div style="display:flex;align-items:center;gap:11px;padding:9px 0;${i ? 'border-top:1px solid var(--border);' : ''}">
+      <span style="width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);" aria-hidden="true">${icon(e.kind === 'exam' ? 'cap' : 'clipboard', 15)}</span>
+      <div style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;">
+        <span style="font-size:13.5px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(e.name)}</span>
+        <span style="font-size:11.5px;color:var(--text-3);">${fmtExamDate(e.date)}</span>
+      </div>
+      <span style="font-size:12px;font-weight:600;color:${soon ? 'var(--accent-2)' : 'var(--text-2)'};white-space:nowrap;flex-shrink:0;">${daysUntilText(e.date)}</span>
+    </div>`;
+  }).join('');
+  const examCard = `
+    <div class="card ov-card b-exams">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('cap', 16)}</span><span class="ov-card-title">Ближайшие экзамены</span>${upcoming.length ? `<span class="ov-card-count">${upcoming.length}</span>` : ''}</div>
+      ${upcoming.length
+        ? `<div style="display:flex;flex-direction:column;margin:-4px 0;">${examRows}</div>`
+        : `<span style="font-size:13px;color:var(--text-3);line-height:1.5;">Нет предстоящих с датой${state.examGroup ? ` для группы ${esc(examGroupTitle(state.examGroup))}` : ''}.</span>`}
+    </div>`;
+
+  // ── По типам заданий ──
+  const activeTypes = TASK_TYPES.filter(tt => typeAgg[tt.type] && typeAgg[tt.type].total > 0);
+  const typeRows = activeTypes.map(tt => {
+    const { done, total: tot } = typeAgg[tt.type];
+    const p = tot ? Math.round(done / tot * 100) : 0;
+    const full = p >= 100;
+    return `
+    <div style="display:flex;flex-direction:column;gap:7px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="display:flex;color:var(--text-3);flex-shrink:0;" aria-hidden="true">${icon(tt.type, 15)}</span>
+        <span style="font-size:13.5px;color:var(--text);flex:1;min-width:0;">${tt.label}</span>
+        <span style="font-size:12.5px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;flex-shrink:0;">${done}<span style="color:var(--text-3);font-weight:500;">/${tot}</span></span>
+      </div>
+      <div style="height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden;">
+        <div style="height:100%;border-radius:99px;background:${full ? 'var(--good)' : 'var(--accent)'};width:${p}%;"></div>
+      </div>
+    </div>`;
+  }).join('');
+  const typeCard = `
+    <div class="card ov-card b-types">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('custom', 16)}</span><span class="ov-card-title">По типам заданий</span><span class="ov-card-count">${activeTypes.length} ${plural(activeTypes.length, ['тип', 'типа', 'типов'])}</span></div>
+      <div style="display:flex;flex-direction:column;gap:15px;">${typeRows}</div>
+    </div>`;
+
+  // ── Семестры ──
+  const sessRows = sessions.map(s => {
+    const d = s.subjects.reduce((a, su) => a + subjectUnits(su).done, 0);
+    const t = s.subjects.reduce((a, su) => a + su.tasks.reduce((x, tt) => x + tt.total, 0), 0) || 1;
+    const p = s.subjects.length ? Math.round(d / t * 100) : 0;
+    const done = s.subjects.length > 0 && s.subjects.every(su => subjectClosed(su));
+    return `
+    <button class="ov-row" data-action="openSession" data-session-id="${esc(s.id)}" aria-label="Открыть семестр ${esc(s.name)}, ${p}%">
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;">
+        <span style="font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(s.name)}</span>
+        <span style="font-size:11.5px;color:var(--text-3);">${s.subjects.length} ${plural(s.subjects.length, ['предмет', 'предмета', 'предметов'])}</span>
+      </div>
+      <div style="width:84px;height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden;flex-shrink:0;">
+        <div style="height:100%;border-radius:99px;background:${done ? 'var(--good)' : 'var(--accent)'};width:${p}%;"></div>
+      </div>
+      <span style="font-size:12.5px;font-weight:600;color:var(--text-2);font-variant-numeric:tabular-nums;width:36px;text-align:right;flex-shrink:0;">${p}%</span>
+    </button>`;
+  }).join('');
+  const sessCard = `
+    <div class="card ov-card b-sems">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('book', 16)}</span><span class="ov-card-title">Семестры</span><span class="ov-card-count">${sessions.length}</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px;">${sessRows}</div>
+    </div>`;
+
+  const subtitle = allClosed
+    ? 'Все предметы закрыты — семестр можно закрывать.'
+    : `${total - closedCount} ${plural(total - closedCount, ['предмет', 'предмета', 'предметов'])} ещё в работе.`;
+
+  return `
+  <div class="${animMainEnter ? 'view-enter' : ''}">
+    ${headerBlock(subtitle)}
+    <div style="max-width:1240px;margin:0 auto;width:100%;padding:0 32px 56px;">
+      <div class="bento">
+        ${progressCard}
+        ${heatmap}
+        ${streakTile}
+        ${doneTile}
+        ${attnCard}
+        ${examCard}
+        ${typeCard}
+        ${sessCard}
+      </div>
+    </div>
+  </div>`;
+}
+
+// Серия подряд идущих дней с активностью, считая назад от сегодня.
+function activityStreak() {
+  const activity = state.activity || {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let streak = 0;
+  for (let i = 0; ; i++) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    if ((activity[dateKey(d)] || 0) > 0) streak++; else break;
+  }
+  return streak;
+}
+
+// Самая длинная серия подряд идущих активных дней за всё время.
+function activityBestStreak() {
+  const activity = state.activity || {};
+  const days = Object.keys(activity).filter(k => activity[k] > 0).sort();
+  if (!days.length) return 0;
+  let best = 1, cur = 1;
+  for (let i = 1; i < days.length; i++) {
+    const diff = Math.round((new Date(days[i]) - new Date(days[i - 1])) / 86400000);
+    if (diff === 1) { cur++; best = Math.max(best, cur); }
+    else if (diff > 1) cur = 1;
+  }
+  return best;
+}
+
+// Сумма отметок активности за последние N дней (включая сегодня).
+function activitySince(days) {
+  const activity = state.activity || {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let sum = 0;
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    sum += activity[dateKey(d)] || 0;
+  }
+  return sum;
+}
+
+// Тепловая карта активности на всю ширину блока: ячейки-квадраты тянутся по ширине,
+// подсвечиваются при наведении, тултип с датой и числом отметок.
+function activityHeatmapHtml(extraClass) {
+  const WEEKS = 18;
+  const SHORT_MONTHS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const activity = state.activity || {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const start = mondayOf(today);
+  start.setDate(start.getDate() - (WEEKS - 1) * 7);
+
+  const level = (c) => {
+    if (c <= 0) return 'var(--surface-2)';
+    if (c === 1) return 'color-mix(in srgb, var(--accent) 32%, var(--surface-2))';
+    if (c <= 3) return 'color-mix(in srgb, var(--accent) 55%, var(--surface-2))';
+    if (c <= 5) return 'color-mix(in srgb, var(--accent) 78%, var(--surface-2))';
+    return 'var(--accent)';
+  };
+
+  let total = 0;
+  const streak = activityStreak();
+
+  // Подписи месяцев — по одной колонке-неделе, когда начинается новый месяц.
+  let months = '', prevMonth = -1;
+  for (let w = 0; w < WEEKS; w++) {
+    const wm = new Date(start); wm.setDate(start.getDate() + w * 7);
+    const m = wm.getMonth();
+    months += `<span>${m !== prevMonth ? SHORT_MONTHS[m] : ''}</span>`;
+    prevMonth = m;
+  }
+
+  // Ячейки построчно: 7 строк (дни недели) × WEEKS колонок (недели).
+  let cells = '';
+  for (let d = 0; d < 7; d++) {
+    for (let w = 0; w < WEEKS; w++) {
+      const cur = new Date(start); cur.setDate(start.getDate() + w * 7 + d);
+      if (cur > today) { cells += `<div class="heat-cell" style="background:transparent;"></div>`; continue; }
+      const c = activity[dateKey(cur)] || 0;
+      total += c;
+      const label = `${cur.getDate()} ${SHORT_MONTHS[cur.getMonth()]} — ${c} ${plural(c, ['отметка', 'отметки', 'отметок'])}`;
+      cells += `<div class="heat-cell filled" title="${label}" style="background:${level(c)};box-shadow:inset 0 0 0 1px rgba(0,0,0,.04);"></div>`;
+    }
+  }
+
+  const legend = `
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-3);">
+      <span>Меньше</span>
+      ${[0, 1, 2, 4, 6].map(c => `<div class="heat-legend-cell" style="background:${level(c)};"></div>`).join('')}
+      <span>Больше</span>
+    </div>`;
+
+  return `
+  <div class="card ov-heat ${extraClass || ''}" style="padding:22px 24px;display:flex;flex-direction:column;gap:14px;min-width:0;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span class="ov-card-ic" aria-hidden="true">${icon('grid', 16)}</span>
+      <span style="font-family:'Onest';font-weight:600;font-size:15px;color:var(--text);letter-spacing:-.01em;">Активность</span>
+      <span style="font-size:12.5px;color:var(--text-3);">${total} ${plural(total, ['отметка', 'отметки', 'отметок'])} за ~4 месяца</span>
+      ${streak > 0 ? `<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--accent-2);background:var(--accent-soft);padding:3px 10px;border-radius:99px;white-space:nowrap;">${streak} ${plural(streak, ['день', 'дня', 'дней'])} подряд</span>` : ''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div class="heat-months" style="grid-template-columns:repeat(${WEEKS},1fr);">${months}</div>
+      <div class="heat-grid" style="grid-template-columns:repeat(${WEEKS},1fr);">${cells}</div>
+    </div>
+    ${legend}
+  </div>`;
+}
+
 function sessionsViewHtml() {
   const cards = state.sessions.map(sess => {
     const done = sess.subjects.reduce((a, su) => a + subjectUnits(su).done, 0);
@@ -761,7 +1113,6 @@ function sessionsViewHtml() {
       ? count + ' ' + plural(count, ['предмет', 'предмета', 'предметов']) + ' · ' + autos + ' ' + plural(autos, ['закрыт', 'закрыто', 'закрыто'])
       : 'Нет предметов';
     const isDone = sess.subjects.length > 0 && sess.subjects.every(su => subjectClosed(su));
-    const ringColor = isDone ? 'var(--good)' : 'var(--accent)';
     const badge = isDone
       ? `<div style="display:flex;align-items:center;gap:5px;padding:5px 10px 5px 8px;border-radius:99px;background:var(--good-soft);color:var(--good);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;">${icon('check', 13)}Завершена</div>`
       : `<div style="display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;background:var(--accent-soft);color:var(--accent-2);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);"></span>Текущая</div>`;
@@ -776,7 +1127,7 @@ function sessionsViewHtml() {
       : `<div style="min-height:8px;font-size:12px;color:var(--text-3);">Пока нет предметов</div>`;
 
     const ring = `
-      <div style="width:66px;height:66px;border-radius:50%;flex-shrink:0;background:conic-gradient(${ringColor} ${pct * 3.6}deg, var(--surface-2) 0deg);display:flex;align-items:center;justify-content:center;">
+      <div style="width:66px;height:66px;border-radius:50%;flex-shrink:0;background:${ringFill(pct, isDone)};display:flex;align-items:center;justify-content:center;">
         <div style="width:52px;height:52px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
           <span style="display:flex;align-items:baseline;gap:1px;">
             <span style="font-family:'Golos Text';font-weight:700;font-size:16px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;">${pct}</span>
@@ -1327,6 +1678,7 @@ function confirmModalHtml() {
 }
 
 const actions = {
+  goDashboard: () => setUI({ navTab: 'dashboard', showThemeMenu: false }),
   goSessionsTab: () => setUI({ navTab: 'main', view: 'sessions', showThemeMenu: false }),
   goSchedule: () => setUI({ navTab: 'schedule', showThemeMenu: false }),
   goToSessions: () => setUI({ view: 'sessions' }),
@@ -1352,6 +1704,7 @@ const actions = {
     if (!task) return;
     const wasClosed = subjectClosed(sub);
     task.completed[index] = !task.completed[index];
+    bumpActivity(task.completed[index] ? 1 : -1);
     lastToggledSegKey = task.completed[index] ? (subjectId + '|' + taskId + '|' + index) : null;
     const rect = (!wasClosed && subjectClosed(sub)) ? el.getBoundingClientRect() : null;
     setState({});
@@ -1363,12 +1716,15 @@ const actions = {
     if (!sess) return;
     const idx = sess.subjects.findIndex(s => s.id === el.dataset.subjectId);
     if (idx === -1) return;
-    const [removed] = sess.subjects.splice(idx, 1);
+    const sub = sess.subjects[idx];
     const sid = sess.id;
-    setState({});
-    offerUndo(`Предмет «${removed.name}» удалён`, () => {
-      const s = state.sessions.find(x => x.id === sid);
-      if (s) s.subjects.splice(Math.min(idx, s.subjects.length), 0, removed);
+    askConfirm({ title: 'Удалить предмет?', message: `«${sub.name}» и весь прогресс по нему будут удалены.`, confirmLabel: 'Удалить' }, () => {
+      const [removed] = sess.subjects.splice(idx, 1);
+      setState({});
+      offerUndo(`Предмет «${removed.name}» удалён`, () => {
+        const s = state.sessions.find(x => x.id === sid);
+        if (s) s.subjects.splice(Math.min(idx, s.subjects.length), 0, removed);
+      });
     });
   },
 
@@ -1379,6 +1735,7 @@ const actions = {
     if (!sub) return;
     const wasClosed = subjectClosed(sub);
     sub.examPassed = !sub.examPassed;
+    bumpActivity(sub.examPassed ? 1 : -1);
     const rect = (!wasClosed && subjectClosed(sub)) ? el.getBoundingClientRect() : null;
     setState({});
     if (rect) fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -1388,11 +1745,14 @@ const actions = {
     const id = el.dataset.sessionId;
     const idx = state.sessions.findIndex(s => s.id === id);
     if (idx === -1) return;
-    const [removed] = state.sessions.splice(idx, 1);
-    if (state.currentSessionId === id) { state.view = 'sessions'; state.currentSessionId = null; }
-    setState({});
-    offerUndo(`Семестр «${removed.name}» удалён`, () => {
-      state.sessions.splice(Math.min(idx, state.sessions.length), 0, removed);
+    const sess = state.sessions[idx];
+    askConfirm({ title: 'Удалить семестр?', message: `«${sess.name}» и все его предметы будут удалены.`, confirmLabel: 'Удалить' }, () => {
+      const [removed] = state.sessions.splice(idx, 1);
+      if (state.currentSessionId === id) { state.view = 'sessions'; state.currentSessionId = null; }
+      setState({});
+      offerUndo(`Семестр «${removed.name}» удалён`, () => {
+        state.sessions.splice(Math.min(idx, state.sessions.length), 0, removed);
+      });
     });
   },
 
