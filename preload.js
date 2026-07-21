@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('adelon', {
   version: appVersion,
   load: () => ipcRenderer.invoke('data:load'),
   save: (data) => ipcRenderer.invoke('data:save', data),
+  file: {
+    save: (defaultName, text) => ipcRenderer.invoke('file:saveText', { defaultName, text }),
+    open: () => ipcRenderer.invoke('file:openText'),
+  },
   ogu: {
     divisions: () => ipcRenderer.invoke('ogu:divisions'),
     courses: (div) => ipcRenderer.invoke('ogu:courses', div),

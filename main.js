@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ogu = require('./ogu');
@@ -123,6 +123,48 @@ ipcMain.handle('update:install', () => {
 
 ipcMain.handle('data:load', () => readData());
 ipcMain.handle('data:save', (_e, data) => writeData(data));
+
+// Excel в русской локали сохраняет обычный CSV в windows-1251, поэтому кириллица
+// в присланном файле может прийти не в UTF-8 — распознаём кодировку по факту.
+function decodeText(buf) {
+  if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return buf.slice(3).toString('utf-8');
+  const utf8 = buf.toString('utf-8');
+  if (!utf8.includes('�')) return utf8;
+  try { return new TextDecoder('windows-1251').decode(buf); } catch (_) { return utf8; }
+}
+
+ipcMain.handle('file:saveText', async (_e, payload) => {
+  const { defaultName, text } = payload || {};
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Экспорт в CSV',
+    defaultPath: defaultName || 'adelon.csv',
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(res.filePath, text, 'utf-8');
+    return { ok: true, name: path.basename(res.filePath) };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('file:openText', async () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Импорт из CSV',
+    properties: ['openFile'],
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  });
+  if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const buf = fs.readFileSync(res.filePaths[0]);
+    return { ok: true, text: decodeText(buf), name: path.basename(res.filePaths[0]) };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
 
 const oguHandler = (fn) => async (_e, ...args) => {
   try { return { ok: true, data: await fn(...args) }; }

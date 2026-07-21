@@ -1,11 +1,33 @@
 'use strict';
 
+// weight — вклад одной работы в процент готовности предмета. Без него курсовая
+// весила бы столько же, сколько одна лабораторная, и проценты врали.
 const TASK_TYPES = [
-  { type: 'flask', label: 'Лабораторные' },
-  { type: 'pen', label: 'Практические' },
-  { type: 'folder', label: 'Проект' },
-  { type: 'book', label: 'Курсовая' },
-  { type: 'custom', label: 'Другое' },
+  { type: 'flask', label: 'Лабораторные', weight: 1 },
+  { type: 'pen', label: 'Практические', weight: 1 },
+  { type: 'folder', label: 'Проект', weight: 3 },
+  { type: 'book', label: 'Курсовая', weight: 5 },
+  { type: 'custom', label: 'Другое', weight: 1 },
+];
+const taskWeight = (t) => {
+  const found = TASK_TYPES.find(x => x.type === (t && t.type));
+  return found ? found.weight : 1;
+};
+
+// Состояния сегмента. Храним прямо в task.completed: false — не сделано,
+// 'ready' — работа готова, но ещё не сдана, true — выполнено. Старые данные
+// (массивы true/false) остаются валидными, поэтому миграция не нужна.
+const SEG_READY = 'ready';
+const segIsDone = (v) => v === true;
+const segIsReady = (v) => v === SEG_READY || v === 'rework';
+// Клик гоняет по кругу: не сделано → готово → выполнено → не сделано.
+const segNext = (v) => (segIsDone(v) ? false : segIsReady(v) ? true : SEG_READY);
+
+const SUBJECT_SORTS = [
+  { id: 'manual', label: 'В порядке добавления' },
+  { id: 'progress', label: 'Сначала отстающие' },
+  { id: 'lesson', label: 'По ближайшей паре' },
+  { id: 'name', label: 'По названию' },
 ];
 
 const AUTO_TYPES = [
@@ -14,12 +36,19 @@ const AUTO_TYPES = [
   { value: 'point', label: '+Балл', name: 'балл', Name: 'Балл' },
 ];
 
-const EXAM_GROUPS = [
+const DEFAULT_EXAM_GROUPS = [
   { id: '41pg', title: '41ПГ' },
   { id: '41pi', title: '41ПИ' },
   { id: '41it', title: '41ИТ' },
   { id: '41ivt', title: '41ИВТ' },
 ];
+
+// Свои группы живут рядом со встроенными: у них нет готового расписания сессии,
+// зато в них можно вести собственный список экзаменов и делиться им через CSV.
+function examGroups() {
+  return [...DEFAULT_EXAM_GROUPS, ...(state.userGroups || [])];
+}
+const isUserGroup = (id) => (state.userGroups || []).some(g => g.id === id);
 
 const EXAM_SCHEDULES = {
   '41pg': [
@@ -54,7 +83,22 @@ const THEME_OPTIONS = [
   { id: 'warm-dark', label: 'Тёплая тёмная', bg: '#1A1917', accent: '#7FB183' },
   { id: 'neutral-light', label: 'Светлая', bg: '#F2F3F4', accent: '#3F8058' },
   { id: 'neutral-dark', label: 'Тёмная', bg: '#131415', accent: '#78AE84' },
+  { id: 'auto-warm', label: 'Как в Windows · тёплая', bg: '#F4F1EB', accent: '#1A1917', auto: true },
+  { id: 'auto-neutral', label: 'Как в Windows · нейтральная', bg: '#F2F3F4', accent: '#131415', auto: true },
 ];
+
+// Автотемы — не самостоятельные палитры, а пара «светлая/тёмная», из которой
+// нужная выбирается по системной настройке Windows.
+const AUTO_THEMES = {
+  'auto-warm': { light: 'warm-light', dark: 'warm-dark' },
+  'auto-neutral': { light: 'neutral-light', dark: 'neutral-dark' },
+};
+const prefersDarkOs = () => !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+function resolveTheme(id) {
+  const pair = AUTO_THEMES[id];
+  if (!pair) return id;
+  return prefersDarkOs() ? pair.dark : pair.light;
+}
 
 const RU_MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 const WEEKDAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
@@ -89,7 +133,8 @@ const state = {
   showAddModal: false,
   editSubjectId: null,
   examPanelOpen: false,
-  examGroup: EXAM_GROUPS[0] ? EXAM_GROUPS[0].id : null,
+  examGroup: DEFAULT_EXAM_GROUPS[0] ? DEFAULT_EXAM_GROUPS[0].id : null,
+  userGroups: [],
   userExams: {},
   hiddenExams: [],
   activity: {},
@@ -98,6 +143,10 @@ const state = {
   undo: null,
   showExamModal: false,
   examDraft: { name: '', kind: 'exam', date: '', dateUnknown: false },
+  showGroupsModal: false,
+  groupDraft: '',
+  subjectSort: 'manual',
+  hideClosed: false,
   showSessionModal: false,
   editSessionId: null,
   showLessonModal: false,
@@ -106,6 +155,9 @@ const state = {
   confirmDialog: null,
   weekOffset: 0,
   showImportModal: false,
+  csvPreview: null,
+  csvBusy: false,
+  notice: null,
   oguUI: null,
   oguBusy: false,
   draft: { name: '', teacher: '', autoType: 'auto', tasks: [{ id: 'd1', type: 'flask', total: 4 }] },
@@ -117,7 +169,7 @@ const state = {
   update: null,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userExams', 'hiddenExams', 'activity', 'remindersSeen'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userGroups', 'userExams', 'hiddenExams', 'activity', 'remindersSeen', 'subjectSort', 'hideClosed'];
 
 function collectPersist() {
   const out = {};
@@ -143,9 +195,13 @@ async function loadPersisted() {
       if (data.schedule && typeof data.schedule === 'object' && !Array.isArray(data.schedule)) state.schedule = data.schedule;
       if (data.oguGroup && typeof data.oguGroup === 'object') state.oguGroup = data.oguGroup;
       if (data.oguSync && typeof data.oguSync === 'object') state.oguSync = data.oguSync;
-      if (typeof data.examGroup === 'string' && EXAM_SCHEDULES[data.examGroup]) state.examGroup = data.examGroup;
+      // Свои группы читаем до examGroup — иначе сохранённый выбор не пройдёт проверку.
+      if (Array.isArray(data.userGroups)) state.userGroups = data.userGroups.filter(g => g && g.id && g.title);
+      if (typeof data.examGroup === 'string' && examGroups().some(g => g.id === data.examGroup)) state.examGroup = data.examGroup;
       if (data.userExams && typeof data.userExams === 'object' && !Array.isArray(data.userExams)) state.userExams = data.userExams;
       if (Array.isArray(data.hiddenExams)) state.hiddenExams = data.hiddenExams;
+      if (SUBJECT_SORTS.some(s => s.id === data.subjectSort)) state.subjectSort = data.subjectSort;
+      if (typeof data.hideClosed === 'boolean') state.hideClosed = data.hideClosed;
       if (data.activity && typeof data.activity === 'object' && !Array.isArray(data.activity)) state.activity = data.activity;
       if (data.remindersSeen && typeof data.remindersSeen === 'object' && !Array.isArray(data.remindersSeen)) state.remindersSeen = data.remindersSeen;
     }
@@ -175,11 +231,14 @@ function plural(n, forms) {
   return forms[2];
 }
 
-const taskDone = (t) => t.completed.filter(Boolean).length;
+const taskDone = (t) => t.completed.filter(segIsDone).length;
+const taskReady = (t) => t.completed.filter(segIsReady).length;
 
+// Проценты считаем по весам, а счётчики работ («5/8») — по штукам:
+// «сколько сделано» и «насколько предмет готов» — разные вопросы.
 function subjectPct(sub) {
-  const done = sub.tasks.reduce((a, t) => a + taskDone(t), 0);
-  const total = sub.tasks.reduce((a, t) => a + t.total, 0) || 1;
+  const done = sub.tasks.reduce((a, t) => a + taskDone(t) * taskWeight(t), 0);
+  const total = sub.tasks.reduce((a, t) => a + t.total * taskWeight(t), 0) || 1;
   return Math.round((done / total) * 100);
 }
 
@@ -230,6 +289,9 @@ function icon(name, size) {
     grid: '<rect x="4" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="4" y="13.8" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="13.8" width="6.2" height="6.2" rx="1.6"/>',
     alert: '<path d="M12 4.5l8 14.5H4L12 4.5z"/><path d="M12 10.5v4"/><path d="M12 17.5h.01"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
+    upload: '<path d="M12 15.5V5"/><path d="M8 9l4-4 4 4"/><path d="M5 19.5h14"/>',
+    clock: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.4V12l3 1.8"/>',
+    sheet: '<rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M4 9.5h16"/><path d="M9.5 9.5V20"/><path d="M4 15h16"/>',
   };
   return open + (P[name] || P.plus) + '</svg>';
 }
@@ -263,14 +325,14 @@ function currentExamList() {
 }
 function examById(id) {
   if (!id) return null;
-  for (const g of EXAM_GROUPS) {
+  for (const g of examGroups()) {
     const found = groupExamList(g.id).find(e => e.id === id);
     if (found) return found;
   }
   return null;
 }
 function examGroupTitle(id) {
-  const g = EXAM_GROUPS.find(x => x.id === id);
+  const g = examGroups().find(x => x.id === id);
   return g ? g.title : '';
 }
 function fmtExamDate(dateStr) {
@@ -371,13 +433,13 @@ function render() {
   }
 
   const mainKey = state.navTab + '|' + state.view + '|' + state.currentSessionId + '|' + state.weekOffset;
-  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showExamModal ? 'exam' : state.showImportModal ? 'import' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
+  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showExamModal ? 'exam' : state.showGroupsModal ? 'groups' : state.showImportModal ? 'import' : state.csvPreview ? 'csv' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
   animMainEnter = mainKey !== lastMainKey;
   animModalEnter = modalKey !== null && modalKey !== lastModalKey;
   animExamEnter = state.examPanelOpen && !lastExamPanelOpen;
   animExamExit = !state.examPanelOpen && lastExamPanelOpen;
 
-  document.documentElement.setAttribute('data-theme', state.themeId);
+  document.documentElement.setAttribute('data-theme', resolveTheme(state.themeId));
   document.body.style.background = 'var(--bg)';
   root.innerHTML = template();
 
@@ -411,6 +473,64 @@ function askConfirm(opts, cb) {
   setUI({ confirmDialog: opts });
 }
 
+// ─── Глобальная отмена ──────────────────────────────────────────────────────
+// Снимок делаем со всех сохраняемых данных перед каждым действием и кладём в
+// стек, только если действие их реально изменило. Так отмена работает для
+// любого действия сама, без правок в каждом обработчике.
+const HISTORY_LIMIT = 50;
+const undoHistory = [];
+const redoHistory = [];
+
+const dataSnapshot = () => JSON.stringify(collectPersist());
+
+function restoreSnapshot(snap) {
+  const data = JSON.parse(snap);
+  for (const k of PERSIST_KEYS) if (k in data) state[k] = data[k];
+  rememberTheme(state.themeId);
+}
+
+function recordHistory(before) {
+  if (dataSnapshot() === before) return;
+  undoHistory.push(before);
+  if (undoHistory.length > HISTORY_LIMIT) undoHistory.shift();
+  redoHistory.length = 0;
+}
+
+function undoLast() {
+  if (!undoHistory.length) { showNotice('Отменять нечего.', 'warn'); return; }
+  redoHistory.push(dataSnapshot());
+  restoreSnapshot(undoHistory.pop());
+  closeAllModals();
+  setState({});
+  showNotice('Действие отменено. Вернуть — Ctrl+Shift+Z.');
+}
+
+function redoLast() {
+  if (!redoHistory.length) { showNotice('Возвращать нечего.', 'warn'); return; }
+  undoHistory.push(dataSnapshot());
+  restoreSnapshot(redoHistory.pop());
+  closeAllModals();
+  setState({});
+  showNotice('Действие возвращено.');
+}
+
+// Отмена может убрать сущность, которую сейчас редактируют, — окна закрываем.
+function closeAllModals() {
+  state.showAddModal = false;
+  state.editSubjectId = null;
+  state.showSessionModal = false;
+  state.editSessionId = null;
+  state.showExamModal = false;
+  state.showGroupsModal = false;
+  state.showLessonModal = false;
+  state.csvPreview = null;
+  state.confirmDialog = null;
+  if (state.currentSessionId && !state.sessions.some(s => s.id === state.currentSessionId)) {
+    state.view = 'sessions';
+    state.currentSessionId = null;
+  }
+}
+
 let undoRestore = null;
 let undoTimer = null;
 const UNDO_MS = 6000;
@@ -431,7 +551,7 @@ function template() {
   const isMain = state.navTab === 'main';
 
   return `
-  <div style="min-height:100vh;background:var(--bg);color:var(--text);font-family:'Golos Text',system-ui,sans-serif;-webkit-font-smoothing:antialiased;" data-theme="${state.themeId}">
+  <div style="min-height:100vh;background:var(--bg);color:var(--text);font-family:'Golos Text',system-ui,sans-serif;-webkit-font-smoothing:antialiased;" data-theme="${resolveTheme(state.themeId)}">
   <div style="${overrideStyle}">
     ${headerHtml(isMain)}
     ${state.navTab === 'dashboard' ? dashboardViewHtml() : ''}
@@ -441,7 +561,9 @@ function template() {
     ${state.showAddModal ? addModalHtml() : ''}
     ${state.showSessionModal ? sessionModalHtml() : ''}
     ${state.showExamModal ? examModalHtml() : ''}
+    ${state.showGroupsModal ? groupsModalHtml() : ''}
     ${state.showImportModal ? importModalHtml() : ''}
+    ${state.csvPreview ? csvModalHtml() : ''}
     ${state.confirmDialog ? confirmModalHtml() : ''}
     ${state.update && state.update.status === 'available' ? updateModalHtml() : ''}
     ${toastStackHtml()}
@@ -521,6 +643,7 @@ function toastStackHtml() {
   const parts = [
     state.examReminders && state.examReminders.length ? examReminderToastHtml() : '',
     state.update ? updateToastHtml() : '',
+    state.notice ? noticeToastHtml() : '',
     state.undo ? undoToastHtml() : '',
   ].filter(Boolean);
   if (!parts.length) return '';
@@ -648,6 +771,88 @@ function groupDayLessons(lessons) {
   groups.sort((a, b) => a._start - b._start);
   return groups;
 }
+// ─── Связь предмета с парой в расписании ────────────────────────────────────
+// Привязываемся к названию пары, а не к конкретному занятию: applyOguEvents при
+// каждой синхронизации сносит все пары с source:'ogu' и создаёт заново, так что
+// ссылка на объект занятия жила бы до первого обновления расписания.
+const lessonKey = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+
+// Уникальные названия пар для выпадающего списка. Считаем только пары, которые
+// ещё будут: расписание хранит и прошедшие недели, а привязка к предмету,
+// который в этом семестре больше не читается, — заведомо бесполезный выбор.
+function scheduleLessonNames() {
+  const todayKey = dateKey(new Date());
+  const seen = new Map();
+  for (const key of Object.keys(state.schedule || {})) {
+    if (key < todayKey) continue;
+    for (const l of state.schedule[key] || []) {
+      const name = (l.name || '').trim();
+      if (!name) continue;
+      const k = lessonKey(name);
+      if (!seen.has(k)) seen.set(k, { name, count: 0 });
+      seen.get(k).count++;
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
+
+// Предмет и пара обычно называются одинаково — предлагаем совпадение само,
+// но только пока пользователь не тронул выпадающий список руками.
+function autoMatchLesson(subjectName) {
+  const want = lessonKey(subjectName);
+  if (!want) return '';
+  const hit = scheduleLessonNames().find(n => lessonKey(n.name) === want);
+  return hit ? hit.name : '';
+}
+function resolveLessonLink(d) {
+  if (d.lessonTouched) return d.lessonLink || '';
+  return d.lessonLink || autoMatchLesson(d.name);
+}
+
+const NEXT_LESSON_HORIZON = 28;
+
+// Ближайшая пара по названию: сегодняшние уже начавшиеся пропускаем.
+function nextLessonByName(name) {
+  if (!name) return null;
+  const want = lessonKey(name);
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  for (let i = 0; i <= NEXT_LESSON_HORIZON; i++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + i);
+    const lessons = (state.schedule || {})[dateKey(d)] || [];
+    const matched = lessons.filter(l => lessonKey(l.name) === want);
+    if (!matched.length) continue;
+    const groups = groupDayLessons(matched);
+    for (const g of groups) {
+      if (i === 0 && g._start <= nowMin) continue;
+      const entry = (g.entries || [])[0] || {};
+      return {
+        date: d,
+        daysAhead: i,
+        time: g.time || PAIR_TIMES[g.pair] || '',
+        kind: g.kind || '',
+        room: entry.room || '',
+        teacher: entry.teacher || '',
+      };
+    }
+  }
+  return null;
+}
+
+function nextLessonText(nl) {
+  if (!nl) return '';
+  const wd = (nl.date.getDay() + 6) % 7;
+  const day = nl.date.getDate() + ' ' + RU_MONTHS[nl.date.getMonth()];
+  // WEEKDAYS содержит только Пн–Сб: для воскресенья остаётся одна дата,
+  // иначе строка начиналась бы с висящей запятой.
+  const weekday = WEEKDAYS[wd] ? WEEKDAYS[wd].toLowerCase() + ', ' : '';
+  const when = nl.daysAhead === 0 ? 'сегодня'
+    : nl.daysAhead === 1 ? 'завтра'
+    : weekday + day;
+  return when + (nl.time ? ', ' + nl.time : '');
+}
+
 function normalizeKind(t) {
   const s = (t || '').toLowerCase();
   if (s.startsWith('лек')) return 'лекция';
@@ -723,18 +928,22 @@ function oguSyncText() {
 }
 
 function headerHtml(isMain) {
-  const currentSwatch = THEME_OPTIONS.find(o => o.id === state.themeId) || THEME_OPTIONS[0];
+  // У автотемы в кнопке показываем ту палитру, что сейчас реально применена.
+  const resolvedId = resolveTheme(state.themeId);
+  const currentSwatch = THEME_OPTIONS.find(o => o.id === resolvedId) || THEME_OPTIONS[0];
   const swatchGrad = `linear-gradient(135deg, ${currentSwatch.bg} 50%, ${currentSwatch.accent} 50%)`;
 
   const themeMenu = state.showThemeMenu ? `
     <div style="position:fixed;inset:0;z-index:40;" data-action="closeThemeMenu"></div>
-    <div class="dropdown-in" style="position:absolute;top:44px;right:0;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:6px;display:flex;flex-direction:column;gap:2px;min-width:200px;box-shadow:0 10px 28px rgba(20,16,12,.12);z-index:50;">
-      ${THEME_OPTIONS.map(o => {
+    <div class="dropdown-in" style="position:absolute;top:44px;right:0;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:6px;display:flex;flex-direction:column;gap:2px;min-width:244px;box-shadow:0 10px 28px rgba(20,16,12,.12);z-index:50;">
+      ${THEME_OPTIONS.map((o, i) => {
         const grad = `linear-gradient(135deg, ${o.bg} 50%, ${o.accent} 50%)`;
         const selected = o.id === state.themeId;
-        return `<button class="theme-row" style="background:${selected ? 'var(--surface-2)' : 'transparent'};" data-action="selectTheme" data-theme-id="${o.id}">
+        const divider = o.auto && !THEME_OPTIONS[i - 1].auto
+          ? `<div style="height:1px;background:var(--border);margin:5px 8px;"></div>` : '';
+        return divider + `<button class="theme-row" style="background:${selected ? 'var(--surface-2)' : 'transparent'};" data-action="selectTheme" data-theme-id="${o.id}">
           <span style="width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1px solid var(--border-strong);background:${grad};"></span>
-          <span style="flex:1;font-size:13.5px;color:var(--text);font-family:'Golos Text';">${o.label}</span>
+          <span style="flex:1;font-size:13.5px;color:var(--text);font-family:'Golos Text';white-space:nowrap;">${o.label}</span>
           ${selected ? `<span style="color:var(--accent);display:flex;">${icon('check', 14)}</span>` : ''}
         </button>`;
       }).join('')}
@@ -1182,16 +1391,22 @@ function sessionsViewHtml() {
 
   return `
   <div class="${animMainEnter ? 'view-enter' : ''}">
-    <div style="max-width:1240px;margin:0 auto;width:100%;padding:34px 32px 22px;">
-      <h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0;">Сессии</h1>
-      <p style="margin:9px 0 0;font-size:14px;color:var(--text-2);">${subtitle}</p>
+    <div style="max-width:1240px;margin:0 auto;width:100%;padding:34px 32px 22px;display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;">
+      <div style="min-width:0;">
+        <h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0;">Сессии</h1>
+        <p style="margin:9px 0 0;font-size:14px;color:var(--text-2);">${subtitle}</p>
+      </div>
+      <div style="display:flex;gap:9px;flex-shrink:0;">
+        <button class="ghost-btn" data-action="importCsv" title="Загрузить предметы и экзамены из файла CSV" style="height:36px;padding:0 14px;font-family:'Onest';display:flex;align-items:center;gap:7px;">${icon('upload', 15)}Импорт CSV</button>
+        <button class="ghost-btn" data-action="exportCsv" title="Выгрузить предметы и экзамены в файл CSV" style="height:36px;padding:0 14px;font-family:'Onest';display:flex;align-items:center;gap:7px;">${icon('download', 15)}Экспорт CSV</button>
+      </div>
     </div>
     ${body}
   </div>`;
 }
 
 function examPanelHtml() {
-  if (!EXAM_GROUPS.length) return '';
+  if (!examGroups().length) return '';
   const open = state.examPanelOpen;
   const list = currentExamList();
   const items = [...list].sort((a, b) => {
@@ -1224,12 +1439,18 @@ function examPanelHtml() {
     </div>`;
   }).join('');
 
+  const own = state.userGroups || [];
+  const groupOption = (g) => `<option value="${esc(g.id)}" ${g.id === state.examGroup ? 'selected' : ''}>${esc(g.title)}</option>`;
   const groupSelect = `
-    <div style="position:relative;display:flex;flex-shrink:0;">
-      <select class="select-input" data-input="examGroupSelect" style="padding:7px 32px 7px 12px;font-size:13px;min-width:112px;">
-        ${EXAM_GROUPS.map(g => `<option value="${esc(g.id)}" ${g.id === state.examGroup ? 'selected' : ''}>${esc(g.title)}</option>`).join('')}
-      </select>
-      <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 14)}</span>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+      <div style="position:relative;display:flex;">
+        <select class="select-input" data-input="examGroupSelect" style="padding:7px 32px 7px 12px;font-size:13px;min-width:112px;">
+          ${DEFAULT_EXAM_GROUPS.map(groupOption).join('')}
+          ${own.length ? `<optgroup label="Свои группы">${own.map(groupOption).join('')}</optgroup>` : ''}
+        </select>
+        <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 14)}</span>
+      </div>
+      <button class="mini-icon-btn" data-action="openGroupsModal" title="Свои группы" style="width:30px;height:30px;flex-shrink:0;">${icon('users', 15)}</button>
     </div>`;
 
   const hiddenCount = (EXAM_SCHEDULES[state.examGroup] || []).filter(e => (state.hiddenExams || []).includes(e.id)).length;
@@ -1261,9 +1482,32 @@ function examPanelHtml() {
   </div>`;
 }
 
+// Порядок и фильтр — только для показа, исходный массив не трогаем: «Как
+// добавлял» должен возвращать ровно ту последовательность, что была.
+function arrangeSubjects(all) {
+  let list = all.slice();
+  if (state.hideClosed) list = list.filter(s => !subjectClosed(s));
+  const sort = state.subjectSort;
+  if (sort === 'progress') {
+    list.sort((a, b) => subjectPct(a) - subjectPct(b) || a.name.localeCompare(b.name, 'ru'));
+  } else if (sort === 'name') {
+    list.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  } else if (sort === 'lesson') {
+    // Предметы без привязки и без будущих пар уходят в конец.
+    const rank = (s) => {
+      const nl = s.lessonLink ? nextLessonByName(s.lessonLink) : null;
+      return nl ? nl.daysAhead : Infinity;
+    };
+    list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'ru'));
+  }
+  return list;
+}
+
 function subjectsViewHtml() {
   const current = state.sessions.find(s => s.id === state.currentSessionId);
-  const subjects = (current ? current.subjects : []);
+  const allSubjects = (current ? current.subjects : []);
+  const subjects = arrangeSubjects(allSubjects);
+  const hiddenByFilter = allSubjects.length - subjects.length;
 
   const subjectCards = subjects.map(s => {
     const L = AUTO_TYPES.find(a => a.value === (s.autoType || 'auto')) || AUTO_TYPES[0];
@@ -1271,10 +1515,16 @@ function subjectsViewHtml() {
     const examChip = linkedExam
       ? `<div style="display:inline-flex;align-items:center;gap:5px;margin-top:3px;padding:3px 9px 3px 7px;border-radius:99px;background:var(--accent-soft);color:var(--accent-2);font-size:11px;font-weight:600;align-self:flex-start;white-space:nowrap;max-width:100%;">${icon(linkedExam.kind === 'exam' ? 'cap' : 'clipboard', 12)}${examKindLabel(linkedExam.kind)}${linkedExam.date ? ' · ' + fmtExamDate(linkedExam.date) : ''}</div>`
       : '';
+    const nextLesson = s.lessonLink ? nextLessonByName(s.lessonLink) : null;
+    const soonLesson = nextLesson && nextLesson.daysAhead <= 1;
+    const lessonChip = nextLesson
+      ? `<div title="${esc(s.lessonLink)}${nextLesson.room ? ' · ' + esc(nextLesson.room) : ''}" style="display:inline-flex;align-items:center;gap:5px;margin-top:3px;padding:3px 9px 3px 7px;border-radius:99px;background:${soonLesson ? 'var(--good-soft)' : 'var(--surface-2)'};color:${soonLesson ? 'var(--good)' : 'var(--text-2)'};font-size:11px;font-weight:600;align-self:flex-start;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">${icon('clock', 12)}${esc(nextLessonText(nextLesson))}${nextLesson.room ? ' · ' + esc(nextLesson.room) : ''}</div>`
+      : '';
     const examPassed = !!s.examPassed;
     const done = s.tasks.reduce((a, t) => a + taskDone(t), 0);
     const total = s.tasks.reduce((a, t) => a + t.total, 0) || 1;
-    const pct = Math.round((done / total) * 100);
+    const readyCount = s.tasks.reduce((a, t) => a + taskReady(t), 0);
+    const pct = subjectPct(s);
     const status = pct >= 100 ? 'auto' : pct >= 70 ? 'close' : 'todo';
     const isAuto = status === 'auto', isClose = status === 'close';
     const closed = examPassed || isAuto;
@@ -1285,7 +1535,8 @@ function subjectsViewHtml() {
       ? 'Предмет закрыт — экзамен сдан'
       : isAuto
         ? 'Все задания сданы — ' + L.name + ' получен'
-        : (isClose ? 'До ' + L.name + 'а: ' : 'Осталось сдать: ') + remaining + ' ' + plural(remaining, ['работа', 'работы', 'работ']);
+        : (isClose ? 'До ' + L.name + 'а: ' : 'Осталось сдать: ') + remaining + ' ' + plural(remaining, ['работа', 'работы', 'работ'])
+          + (readyCount ? ', из них готово ' + readyCount : '');
 
     const badge = examPassed
       ? `<div style="display:flex;align-items:center;gap:5px;padding:5px 10px 5px 8px;border-radius:99px;background:var(--good-soft);color:var(--good);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;">${icon('cap', 13)}Экзамен сдан</div>`
@@ -1296,15 +1547,18 @@ function subjectsViewHtml() {
         : `<div style="display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;background:var(--surface-2);color:var(--text-2);font-size:11.5px;font-weight:600;white-space:nowrap;flex-shrink:0;"><span style="width:6px;height:6px;border-radius:50%;background:var(--text-3);"></span>Нужно доделать</div>`;
 
     const tasksHtml = s.tasks.map(t => {
-      const segs = t.completed.map((doneSeg, i) => {
+      const segs = t.completed.map((v, i) => {
         const justToggled = lastToggledSegKey === (s.id + '|' + t.id + '|' + i);
-        return `<button class="seg${justToggled ? ' seg-pop' : ''}" style="background:${doneSeg ? segOn : 'var(--seg-empty)'};" data-action="toggleSegment" data-subject-id="${esc(s.id)}" data-task-id="${esc(t.id)}" data-index="${i}" title="${doneSeg ? 'Отменить' : 'Отметить сделанным'}"></button>`;
+        const bg = segIsDone(v) ? segOn : segIsReady(v) ? 'var(--warn)' : 'var(--seg-empty)';
+        const hint = segIsDone(v) ? 'Выполнено → снять отметку' : segIsReady(v) ? 'Готово → выполнено' : 'Не сделано → готово';
+        return `<button class="seg${justToggled ? ' seg-pop' : ''}" style="background:${bg};" data-action="toggleSegment" data-subject-id="${esc(s.id)}" data-task-id="${esc(t.id)}" data-index="${i}" title="${hint}"></button>`;
       }).join('');
       return `
         <div style="display:flex;flex-direction:column;gap:8px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="display:flex;color:var(--text-3);flex-shrink:0;">${icon(t.type, 15)}</span>
             <span style="font-size:13.5px;color:var(--text-2);flex:1;min-width:0;">${esc(t.label)}</span>
+            ${taskReady(t) ? `<span title="Готово, осталось сдать" style="display:flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;color:var(--warn);flex-shrink:0;">${icon('check', 12)}${taskReady(t)}</span>` : ''}
             <span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:13px;color:var(--text);font-weight:600;flex-shrink:0;">${taskDone(t)}/${t.total}</span>
           </div>
           <div style="display:flex;gap:4px;">${segs}</div>
@@ -1318,6 +1572,7 @@ function subjectsViewHtml() {
           <div style="font-family:'Onest';font-weight:600;font-size:18px;letter-spacing:-.015em;color:var(--text);line-height:1.2;overflow-wrap:anywhere;">${esc(s.name)}</div>
           <div style="font-size:12.5px;color:var(--text-3);overflow-wrap:anywhere;">${esc(s.meta)}</div>
           ${examChip}
+          ${lessonChip}
         </div>
         <div style="flex-shrink:0;max-width:45%;display:flex;justify-content:flex-end;">${badge}</div>
       </div>
@@ -1342,10 +1597,22 @@ function subjectsViewHtml() {
     </div>`;
   }).join('');
 
-  const autos = subjects.filter(s => subjectClosed(s)).length;
-  const summaryText = subjects.length
-    ? subjects.length + ' ' + plural(subjects.length, ['предмет', 'предмета', 'предметов']) + ' · ' + autos + ' ' + plural(autos, ['закрыт', 'закрыто', 'закрыто'])
+  const autos = allSubjects.filter(s => subjectClosed(s)).length;
+  const summaryText = allSubjects.length
+    ? allSubjects.length + ' ' + plural(allSubjects.length, ['предмет', 'предмета', 'предметов']) + ' · ' + autos + ' ' + plural(autos, ['закрыт', 'закрыто', 'закрыто'])
+      + (hiddenByFilter ? ' · скрыто ' + hiddenByFilter : '')
     : 'Пока нет предметов';
+
+  const sortControls = allSubjects.length ? `
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;">
+      <div style="position:relative;display:flex;">
+        <select class="select-input" data-input="subjectSort" style="padding:7px 32px 7px 12px;font-size:13px;">
+          ${SUBJECT_SORTS.map(o => `<option value="${o.id}" ${o.id === state.subjectSort ? 'selected' : ''}>${o.label}</option>`).join('')}
+        </select>
+        <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 14)}</span>
+      </div>
+      <button class="ghost-btn" data-action="toggleHideClosed" title="Скрыть закрытые предметы" style="height:34px;padding:0 12px;font-size:13px;display:flex;align-items:center;gap:6px;${state.hideClosed ? 'background:var(--accent-soft);color:var(--accent-2);border-color:transparent;' : ''}">${icon(state.hideClosed ? 'check' : 'target', 14)}Только незакрытые</button>
+    </div>` : '';
 
   return `
   <div class="${animMainEnter ? 'view-enter' : ''}">
@@ -1355,10 +1622,14 @@ function subjectsViewHtml() {
         <h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0;">${esc(current ? current.name : '')}</h1>
         <p style="margin:9px 0 0;font-size:14px;color:var(--text-2);">${esc(current ? current.period : '')} — ${summaryText}</p>
       </div>
-      <div style="display:flex;gap:18px;align-items:center;">
-        <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--good);"></span>Выполнено</div>
-        <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent);"></span>Почти готово</div>
-        <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--text-3);"></span>Нужно доделать</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:12px;">
+        ${sortControls}
+        <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+          <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--good);"></span>Выполнено</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--warn);"></span>Готово, не сдано</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent);"></span>Почти готово</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text-2);"><span style="width:8px;height:8px;border-radius:50%;background:var(--text-3);"></span>Нужно доделать</div>
+        </div>
       </div>
     </div>
     ${examPanelHtml()}
@@ -1506,7 +1777,7 @@ function addModalHtml() {
           <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Что даёт полное выполнение</span>
           <div style="display:flex;gap:3px;background:var(--surface-2);padding:3px;border-radius:11px;">${autoOpts}</div>
         </div>
-        ${EXAM_GROUPS.length && state.examGroup ? `
+        ${examGroups().length && state.examGroup ? `
         <div style="display:flex;flex-direction:column;gap:6px;">
           <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Экзамен или зачёт · ${esc(examGroupTitle(state.examGroup))}</span>
           <div style="position:relative;display:flex;">
@@ -1517,6 +1788,32 @@ function addModalHtml() {
             <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 15)}</span>
           </div>
         </div>` : ''}
+        ${(() => {
+          const names = scheduleLessonNames();
+          if (!names.length) {
+            return `
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Пара в расписании</span>
+              <span style="font-size:12.5px;line-height:1.5;color:var(--text-3);">Расписание пустое — привязывать не к чему. Загрузи его на вкладке «Расписание».</span>
+            </div>`;
+          }
+          const linked = resolveLessonLink(d);
+          const known = names.some(n => lessonKey(n.name) === lessonKey(linked));
+          const nl = linked ? nextLessonByName(linked) : null;
+          return `
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Пара в расписании</span>
+            <div style="position:relative;display:flex;">
+              <select class="select-input" data-input="lessonLink">
+                <option value="" ${!linked ? 'selected' : ''}>— Не привязано —</option>
+                ${names.map(n => `<option value="${esc(n.name)}" ${lessonKey(n.name) === lessonKey(linked) ? 'selected' : ''}>${esc(n.name)} · впереди ${n.count} ${plural(n.count, ['пара', 'пары', 'пар'])}</option>`).join('')}
+                ${linked && !known ? `<option value="${esc(linked)}" selected>${esc(linked)} · нет в расписании</option>` : ''}
+              </select>
+              <span style="position:absolute;right:12px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--text-3);display:flex;">${icon('chevron-down', 15)}</span>
+            </div>
+            ${linked ? `<span style="font-size:12px;color:var(--text-3);">${nl ? 'Ближайшая пара — ' + esc(nextLessonText(nl)) : 'В ближайшие 4 недели пар нет'}</span>` : ''}
+          </div>`;
+        })()}
       </div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <span style="font-size:12.5px;color:var(--text-2);font-weight:500;">Задания</span>
@@ -1653,6 +1950,46 @@ function importModalHtml() {
   </div>`;
 }
 
+function groupsModalHtml() {
+  const own = state.userGroups || [];
+  const draft = state.groupDraft || '';
+  const taken = examGroups().some(g => csvNorm(g.title) === csvNorm(draft));
+  const canAdd = draft.trim().length > 0 && !taken;
+
+  const rows = own.length ? own.map((g, i) => {
+    const count = groupExamList(g.id).length;
+    return `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 2px;${i ? 'border-top:1px solid var(--border);' : ''}">
+      <span style="width:32px;height:32px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);">${icon('users', 15)}</span>
+      <div style="display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;">
+        <span style="font-size:14px;font-weight:500;color:var(--text);overflow-wrap:anywhere;">${esc(g.title)}</span>
+        <span style="font-size:12px;color:var(--text-3);">${count} ${plural(count, ['запись', 'записи', 'записей'])}</span>
+      </div>
+      <button class="mini-icon-btn" data-action="deleteGroup" data-group-id="${esc(g.id)}" title="Удалить группу" style="width:28px;height:28px;flex-shrink:0;">${icon('trash', 13)}</button>
+    </div>`;
+  }).join('') : `<p style="margin:0;font-size:13px;line-height:1.5;color:var(--text-3);">Своих групп пока нет. Встроенные — ${DEFAULT_EXAM_GROUPS.map(g => g.title).join(', ')} — остаются на месте.</p>`;
+
+  return `
+  <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}" data-action="closeGroupsModal">
+    <div class="card scroll-y" style="border-radius:18px;padding:26px;width:420px;max-width:100%;max-height:86vh;display:flex;flex-direction:column;gap:20px;" data-stop="1">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Свои группы</h2>
+        <button class="close-btn" data-action="closeGroupsModal">${icon('x', 16)}</button>
+      </div>
+      <div style="display:flex;flex-direction:column;">${rows}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <label for="group-title" style="font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);">Новая группа</label>
+        <div style="display:flex;gap:9px;">
+          <input type="text" id="group-title" class="text-input" placeholder="Например, 41АБ" value="${esc(draft)}" data-input="groupDraft" style="flex:1;" />
+          <button class="primary-btn" data-action="submitGroup" ${canAdd ? '' : 'disabled'} style="flex-shrink:0;opacity:${canAdd ? 1 : 0.5};">Добавить</button>
+        </div>
+        ${taken ? `<span style="font-size:12px;color:var(--text-3);">Группа «${esc(draft.trim())}» уже есть в списке.</span>` : ''}
+      </div>
+      <p style="margin:0;font-size:12.5px;line-height:1.5;color:var(--text-3);">У своих групп нет готового расписания сессии — экзамены в них добавляешь сам или получаешь через импорт CSV.</p>
+    </div>
+  </div>`;
+}
+
 function confirmModalHtml() {
   const d = state.confirmDialog;
   return `
@@ -1673,6 +2010,328 @@ function confirmModalHtml() {
   </div>`;
 }
 
+// ─── Обмен предметами и экзаменами через CSV ────────────────────────────────
+// Один файл на всё: первая колонка задаёт тип строки, поэтому готовый список
+// можно просто переслать однокурснику, а не набивать его руками.
+const CSV_SEP = ';';
+const CSV_TASK_COLUMNS = [
+  { type: 'flask', header: 'Лабораторные' },
+  { type: 'pen', header: 'Практические' },
+  { type: 'folder', header: 'Проект' },
+  { type: 'book', header: 'Курсовая' },
+  { type: 'custom', header: 'Другое' },
+];
+const CSV_HEADERS = ['Тип', 'Семестр/Группа', 'Название', 'Преподаватель', 'Закрытие', ...CSV_TASK_COLUMNS.map(c => c.header), 'Дата'];
+
+// «Зачёт» и «зачет» должны совпадать, поэтому ё сводим к е.
+const csvNorm = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/ё/g, 'е');
+
+function csvCell(v) {
+  const s = String(v == null ? '' : v);
+  return /["\n\r;,]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+const csvRow = (cells) => cells.map(csvCell).join(CSV_SEP);
+
+function csvTaskCell(tasks, type) {
+  const list = (tasks || []).filter(t => t.type === type);
+  if (!list.length) return '';
+  if (type === 'custom') return list.map(t => `${t.label || 'Задание'} ${taskDone(t)}/${t.total}`).join(' | ');
+  const done = list.reduce((a, t) => a + taskDone(t), 0);
+  const total = list.reduce((a, t) => a + t.total, 0);
+  return `${done}/${total}`;
+}
+
+function buildCsv() {
+  const lines = [csvRow(CSV_HEADERS)];
+  for (const sess of state.sessions) {
+    for (const sub of sess.subjects || []) {
+      const auto = AUTO_TYPES.find(a => a.value === (sub.autoType || 'auto')) || AUTO_TYPES[0];
+      lines.push(csvRow([
+        'предмет', sess.name, sub.name,
+        sub.meta && sub.meta !== 'Преподаватель' ? sub.meta : '',
+        auto.Name,
+        ...CSV_TASK_COLUMNS.map(c => csvTaskCell(sub.tasks, c.type)),
+        '',
+      ]));
+    }
+  }
+  for (const g of examGroups()) {
+    for (const e of groupExamList(g.id)) {
+      lines.push(csvRow([
+        e.kind === 'zachet' ? 'зачёт' : 'экзамен', g.title, e.name, '', '',
+        '', '', '', '', '', e.date || '',
+      ]));
+    }
+  }
+  // BOM — иначе Excel открывает кириллицу кракозябрами.
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}
+
+// Разделитель зависит от того, в какой локали файл сохраняли, — смотрим шапку.
+function csvDetectSep(src) {
+  const head = src.split(/\r?\n/)[0] || '';
+  let semi = 0, comma = 0, quoted = false;
+  for (const ch of head) {
+    if (ch === '"') quoted = !quoted;
+    else if (quoted) continue;
+    else if (ch === ';') semi++;
+    else if (ch === ',') comma++;
+  }
+  return comma > semi ? ',' : ';';
+}
+
+function parseCsvText(text) {
+  const src = String(text || '').replace(/^﻿/, '');
+  const sep = csvDetectSep(src);
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch !== '"') { cell += ch; continue; }
+      if (src[i + 1] === '"') { cell += '"'; i++; } else quoted = false;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === sep) { row.push(cell); cell = ''; continue; }
+    if (ch === '\r') continue;
+    if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; continue; }
+    cell += ch;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => c.trim() !== ''));
+}
+
+// Принимаем и «3/8», и просто «8» — во втором случае это всего заданий.
+function parseCsvCount(cell) {
+  const pair = String(cell).match(/(\d+)\s*\/\s*(\d+)/);
+  if (pair) return { done: Number(pair[1]), total: Number(pair[2]) };
+  const one = String(cell).match(/(\d+)/);
+  return one ? { done: 0, total: Number(one[1]) } : null;
+}
+
+function parseCsvDate(cell) {
+  const s = String(cell || '').trim();
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  const ru = s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})$/);
+  if (ru) return `${ru[3]}-${ru[2].padStart(2, '0')}-${ru[1].padStart(2, '0')}`;
+  return null;
+}
+
+function parseCsvAuto(cell) {
+  const v = csvNorm(cell);
+  if (!v) return 'auto';
+  const found = AUTO_TYPES.find(a => csvNorm(a.Name) === v || csvNorm(a.value) === v || csvNorm(a.label) === v);
+  return found ? found.value : 'auto';
+}
+
+// Разбирает файл и сразу считает, что реально добавится, — итог показываем
+// в окне подтверждения, чтобы импорт не был прыжком в неизвестность.
+function analyzeCsv(text, fileName) {
+  const empty = { fileName, sessions: [], exams: [], errors: [], stats: null };
+  const rows = parseCsvText(text);
+  if (!rows.length) return { ...empty, errors: ['Файл пустой.'] };
+
+  const header = rows[0].map(csvNorm);
+  const idx = {};
+  CSV_HEADERS.forEach(h => { idx[h] = header.indexOf(csvNorm(h)); });
+  if (idx['Тип'] === -1 || idx['Название'] === -1) {
+    return { ...empty, errors: ['Не найдена строка заголовков: нужны колонки «Тип» и «Название». Проще всего взять за образец файл из «Экспорт CSV».'] };
+  }
+  const at = (row, h) => (idx[h] === -1 ? '' : String(row[idx[h]] || '').trim());
+
+  const errors = [];
+  const sessionsMap = new Map();
+  const examsMap = new Map();
+  const newGroups = [];
+  const stats = { newSessions: 0, newSubjects: 0, skippedSubjects: 0, newGroups: 0, newExams: 0, skippedExams: 0 };
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const line = i + 1;
+    const kind = csvNorm(at(row, 'Тип'));
+    const name = at(row, 'Название');
+    const owner = at(row, 'Семестр/Группа');
+    if (!name) { errors.push(`Строка ${line}: пустое название — пропущена.`); continue; }
+
+    if (kind === 'предмет') {
+      if (!owner) { errors.push(`Строка ${line}: у предмета «${name}» не указан семестр — пропущен.`); continue; }
+      const tasks = [];
+      for (const c of CSV_TASK_COLUMNS) {
+        const raw = at(row, c.header);
+        if (!raw) continue;
+        const parts = c.type === 'custom' ? raw.split('|') : [raw];
+        for (const part of parts) {
+          const cnt = parseCsvCount(part);
+          if (!cnt || !cnt.total) continue;
+          const label = c.type === 'custom'
+            ? (part.replace(/\d+\s*\/\s*\d+/g, '').replace(/\d+/g, '').trim() || 'Задание')
+            : ((TASK_TYPES.find(x => x.type === c.type) || {}).label || c.header);
+          tasks.push({ type: c.type, label, total: cnt.total });
+        }
+      }
+      if (!tasks.length) { errors.push(`Строка ${line}: у предмета «${name}» не указано ни одного задания — пропущен.`); continue; }
+
+      const key = csvNorm(owner);
+      if (!sessionsMap.has(key)) {
+        const existing = state.sessions.find(s => csvNorm(s.name) === key);
+        sessionsMap.set(key, { name: existing ? existing.name : owner, isNew: !existing, subjects: [] });
+        if (!existing) stats.newSessions++;
+      }
+      const bucket = sessionsMap.get(key);
+      const inApp = state.sessions.find(s => csvNorm(s.name) === key);
+      const dup = (inApp && (inApp.subjects || []).some(s => csvNorm(s.name) === csvNorm(name)))
+        || bucket.subjects.some(s => csvNorm(s.name) === csvNorm(name));
+      if (dup) { stats.skippedSubjects++; continue; }
+      bucket.subjects.push({ name, teacher: at(row, 'Преподаватель'), autoType: parseCsvAuto(at(row, 'Закрытие')), tasks });
+      stats.newSubjects++;
+      continue;
+    }
+
+    if (kind === 'экзамен' || kind === 'зачет') {
+      if (!owner) { errors.push(`Строка ${line}: у «${name}» не указана группа — пропущена.`); continue; }
+      // Незнакомую группу не отвергаем, а заводим свою: иначе файлом нельзя
+      // поделиться ни с кем за пределами встроенного списка.
+      let g = examGroups().find(x => csvNorm(x.title) === csvNorm(owner) || csvNorm(x.id) === csvNorm(owner));
+      if (!g) {
+        const pending = newGroups.find(x => csvNorm(x.title) === csvNorm(owner));
+        if (pending) { g = pending; }
+        else { g = { id: uid('ug'), title: owner, _new: true }; newGroups.push(g); stats.newGroups++; }
+      }
+      const ek = kind === 'зачет' ? 'zachet' : 'exam';
+      const rawDate = at(row, 'Дата');
+      const date = parseCsvDate(rawDate);
+      if (rawDate && !date) errors.push(`Строка ${line}: дата «${rawDate}» не распознана — «${name}» добавится без даты.`);
+      if (!examsMap.has(g.id)) examsMap.set(g.id, { groupId: g.id, title: g.title, items: [] });
+      const bucket = examsMap.get(g.id);
+      const dup = groupExamList(g.id).some(e => csvNorm(e.name) === csvNorm(name) && e.kind === ek)
+        || bucket.items.some(e => csvNorm(e.name) === csvNorm(name) && e.kind === ek);
+      if (dup) { stats.skippedExams++; continue; }
+      bucket.items.push({ name, kind: ek, date });
+      stats.newExams++;
+      continue;
+    }
+
+    errors.push(`Строка ${line}: неизвестный тип «${at(row, 'Тип') || '—'}» — ожидается «предмет», «экзамен» или «зачёт».`);
+  }
+
+  return { fileName, sessions: [...sessionsMap.values()], exams: [...examsMap.values()], newGroups, errors, stats };
+}
+
+function applyCsvPreview(p) {
+  for (const s of p.sessions) {
+    if (!s.subjects.length) continue;
+    let sess = state.sessions.find(x => csvNorm(x.name) === csvNorm(s.name));
+    if (!sess) {
+      sess = { id: uid('sess'), name: s.name, period: 'Без периода', subjects: [] };
+      state.sessions.push(sess);
+    }
+    for (const sub of s.subjects) {
+      sess.subjects.push({
+        id: uid('subj'),
+        name: sub.name,
+        meta: sub.teacher || 'Преподаватель',
+        autoType: sub.autoType,
+        examLink: null,
+        // Привязку к паре в файле не передаём — она зависит от расписания
+        // получателя, поэтому подбираем по названию уже на этой стороне.
+        lessonLink: autoMatchLesson(sub.name) || null,
+        tasks: sub.tasks.map(t => ({ id: uid('t'), type: t.type, label: t.label, total: t.total, completed: mk(t.total, 0) })),
+      });
+    }
+  }
+  for (const ng of p.newGroups || []) {
+    if (!(state.userGroups || []).some(x => csvNorm(x.title) === csvNorm(ng.title))) {
+      state.userGroups = [...(state.userGroups || []), { id: ng.id, title: ng.title }];
+    }
+  }
+  for (const g of p.exams) {
+    if (!g.items.length) continue;
+    if (!state.userExams[g.groupId]) state.userExams[g.groupId] = [];
+    state.userExams[g.groupId] = [
+      ...state.userExams[g.groupId],
+      ...g.items.map(e => ({ id: uid('uex'), name: e.name, kind: e.kind, date: e.date })),
+    ];
+  }
+}
+
+let noticeTimer = null;
+function showNotice(message, tone) {
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { if (state.notice) setUI({ notice: null }); }, 5000);
+  setUI({ notice: { message, tone: tone || 'ok' } });
+}
+
+function csvModalHtml() {
+  const p = state.csvPreview;
+  const s = p.stats;
+  const nothing = !s || (!s.newSubjects && !s.newExams);
+
+  const line = (label, value, muted) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:9px 10px;margin:0 -10px;border-radius:10px;">
+      <span style="font-size:13.5px;color:${muted ? 'var(--text-3)' : 'var(--text)'};flex:1;min-width:0;">${label}</span>
+      <span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:13.5px;font-weight:600;color:${muted ? 'var(--text-3)' : 'var(--text)'};flex-shrink:0;">${value}</span>
+    </div>`;
+
+  const rows = s ? [
+    s.newSubjects ? line('Новых предметов', s.newSubjects) : '',
+    s.newSessions ? line('Будет создано семестров', s.newSessions) : '',
+    s.newGroups ? line('Будет создано групп', s.newGroups) : '',
+    s.newExams ? line('Новых экзаменов и зачётов', s.newExams) : '',
+    s.skippedSubjects ? line('Уже есть — предметы пропущены', s.skippedSubjects, true) : '',
+    s.skippedExams ? line('Уже есть — экзамены пропущены', s.skippedExams, true) : '',
+  ].filter(Boolean).join('<div style="height:1px;background:var(--border);"></div>') : '';
+
+  const errorsBlock = p.errors.length ? `
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <span style="font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);">Замечания · ${p.errors.length}</span>
+      <div class="scroll-y" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--bg);display:flex;flex-direction:column;gap:7px;">
+        ${p.errors.map(e => `<span style="font-size:12.5px;line-height:1.45;color:var(--text-2);">${esc(e)}</span>`).join('')}
+      </div>
+    </div>` : '';
+
+  const bodyBlock = nothing
+    ? `<p style="margin:0;font-size:13.5px;line-height:1.55;color:var(--text-2);">Добавлять нечего: всё из файла уже есть в приложении либо строки не удалось разобрать.</p>`
+    : `<div style="display:flex;flex-direction:column;">${rows}</div>
+       <p style="margin:0;font-size:12.5px;line-height:1.5;color:var(--text-3);">Отметки о выполнении не переносятся — задания добавятся невыполненными. Существующие предметы и прогресс не тронутся.</p>`;
+
+  return `
+  <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}" data-action="closeCsvModal">
+    <div class="card scroll-y" style="border-radius:18px;padding:26px;width:460px;max-width:100%;max-height:86vh;display:flex;flex-direction:column;gap:20px;" data-stop="1">
+      <div style="display:flex;align-items:center;gap:13px;">
+        <span style="width:44px;height:44px;border-radius:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);">${icon('sheet', 22)}</span>
+        <div style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;">
+          <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Импорт из CSV</h2>
+          <span style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.fileName || 'файл')}</span>
+        </div>
+        <button class="close-btn" data-action="closeCsvModal">${icon('x', 16)}</button>
+      </div>
+      ${bodyBlock}
+      ${errorsBlock}
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:2px;">
+        <button class="ghost-btn" data-action="closeCsvModal">${nothing ? 'Закрыть' : 'Отмена'}</button>
+        ${nothing ? '' : `<button class="primary-btn" data-action="applyCsvImport">Добавить</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function noticeToastHtml() {
+  const n = state.notice;
+  if (!n) return '';
+  const warn = n.tone === 'warn';
+  return `
+  <div class="app-toast" style="width:100%;pointer-events:auto;">
+    <div class="card" style="border-radius:14px;padding:12px 12px 12px 14px;display:flex;align-items:center;gap:10px;overflow:hidden;box-shadow:0 14px 40px rgba(20,16,12,.22);">
+      <span style="width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${warn ? 'var(--surface-2)' : 'var(--good-soft)'};color:${warn ? 'var(--text-2)' : 'var(--good)'};">${icon(warn ? 'alert' : 'check', 15)}</span>
+      <span style="font-size:13.5px;line-height:1.4;color:var(--text);flex:1;min-width:0;overflow-wrap:anywhere;">${esc(n.message)}</span>
+      <button class="mini-icon-btn" style="width:28px;height:28px;flex-shrink:0;" data-action="dismissNotice" title="Закрыть">${icon('x', 14)}</button>
+    </div>
+  </div>`;
+}
+
 const actions = {
   goDashboard: () => setUI({ navTab: 'dashboard', showThemeMenu: false }),
   goSessionsTab: () => setUI({ navTab: 'main', view: 'sessions', showThemeMenu: false }),
@@ -1684,6 +2343,7 @@ const actions = {
 
   openSession: (el) => setUI({ navTab: 'main', view: 'subjects', currentSessionId: el.dataset.sessionId }),
   toggleExamPanel: () => setUI({ examPanelOpen: !state.examPanelOpen }),
+  toggleHideClosed: () => setState({ hideClosed: !state.hideClosed }),
 
   prevWeek: () => setUI({ weekOffset: state.weekOffset - 1 }),
   nextWeek: () => setUI({ weekOffset: state.weekOffset + 1 }),
@@ -1699,9 +2359,14 @@ const actions = {
     const task = sub.tasks.find(t => t.id === taskId);
     if (!task) return;
     const wasClosed = subjectClosed(sub);
-    task.completed[index] = !task.completed[index];
-    bumpActivity(task.completed[index] ? 1 : -1);
-    lastToggledSegKey = task.completed[index] ? (subjectId + '|' + taskId + '|' + index) : null;
+    const was = task.completed[index];
+    const now = segNext(was);
+    task.completed[index] = now;
+    // Активность считаем только по переходам в «сдано» и обратно:
+    // «готово» — это ещё не сданная работа.
+    if (segIsDone(now) && !segIsDone(was)) bumpActivity(1);
+    else if (!segIsDone(now) && segIsDone(was)) bumpActivity(-1);
+    lastToggledSegKey = segIsDone(now) ? (subjectId + '|' + taskId + '|' + index) : null;
     const rect = (!wasClosed && subjectClosed(sub)) ? el.getBoundingClientRect() : null;
     setState({});
     if (rect) fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -1811,10 +2476,60 @@ const actions = {
   },
   refreshOgu: () => { refreshOguData(); },
 
+  exportCsv: async () => {
+    if (state.csvBusy) return;
+    const file = window.adelon && window.adelon.file;
+    if (!file) { showNotice('Экспорт доступен только в приложении.', 'warn'); return; }
+    const subjects = state.sessions.reduce((a, s) => a + (s.subjects || []).length, 0);
+    const exams = examGroups().reduce((a, g) => a + groupExamList(g.id).length, 0);
+    if (!subjects && !exams) { showNotice('Нечего выгружать — нет ни предметов, ни экзаменов.', 'warn'); return; }
+    setUI({ csvBusy: true });
+    try {
+      const res = await file.save(`adelon-${dateKey(new Date())}.csv`, buildCsv());
+      if (res && res.ok) {
+        showNotice(`Выгружено: ${subjects} ${plural(subjects, ['предмет', 'предмета', 'предметов'])}, ${exams} ${plural(exams, ['экзамен', 'экзамена', 'экзаменов'])}.`);
+      } else if (res && res.error) {
+        showNotice('Не удалось сохранить файл: ' + res.error, 'warn');
+      }
+    } finally {
+      setUI({ csvBusy: false });
+    }
+  },
+  importCsv: async () => {
+    if (state.csvBusy) return;
+    const file = window.adelon && window.adelon.file;
+    if (!file) { showNotice('Импорт доступен только в приложении.', 'warn'); return; }
+    setUI({ csvBusy: true });
+    try {
+      const res = await file.open();
+      if (!res || !res.ok) {
+        if (res && res.error) showNotice('Не удалось прочитать файл: ' + res.error, 'warn');
+        return;
+      }
+      setUI({ csvPreview: analyzeCsv(res.text, res.name) });
+    } finally {
+      setUI({ csvBusy: false });
+    }
+  },
+  closeCsvModal: () => setUI({ csvPreview: null }),
+  applyCsvImport: () => {
+    const p = state.csvPreview;
+    if (!p || !p.stats) return;
+    const { newSubjects, newExams } = p.stats;
+    if (!newSubjects && !newExams) { setUI({ csvPreview: null }); return; }
+    applyCsvPreview(p);
+    setState({ csvPreview: null });
+    const parts = [];
+    if (newSubjects) parts.push(`${newSubjects} ${plural(newSubjects, ['предмет', 'предмета', 'предметов'])}`);
+    if (newExams) parts.push(`${newExams} ${plural(newExams, ['экзамен', 'экзамена', 'экзаменов'])}`);
+    showNotice('Добавлено: ' + parts.join(', ') + '.');
+  },
+  dismissNotice: () => setUI({ notice: null }),
+
   openAddModal: () => setUI({
     showAddModal: true,
     editSubjectId: null,
-    draft: { name: '', teacher: '', autoType: 'auto', examLink: '', tasks: [{ id: uid('d'), type: 'flask', total: 4 }] },
+    draft: { name: '', teacher: '', autoType: 'auto', examLink: '', lessonLink: '', tasks: [{ id: uid('d'), type: 'flask', total: 4 }] },
   }),
   openEditModal: (el) => {
     const sess = state.sessions.find(s => s.id === state.currentSessionId);
@@ -1829,6 +2544,7 @@ const actions = {
         teacher: sub.meta && sub.meta !== 'Преподаватель' ? sub.meta : '',
         autoType: sub.autoType || 'auto',
         examLink: sub.examLink || '',
+        lessonLink: sub.lessonLink || '',
         tasks: sub.tasks.map(t => ({
           id: uid('d'), type: t.type, total: String(t.total),
           customLabel: t.type === 'custom' ? (t.label || '') : '',
@@ -1847,16 +2563,23 @@ const actions = {
     const sid = state.currentSessionId;
     const built = d.tasks.filter(t => Number(t.total) > 0).map(t => {
       const total = Number(t.total);
-      const done = t.origCompleted ? Math.min(t.origCompleted.filter(Boolean).length, total) : 0;
       const label = t.type === 'custom'
         ? ((t.customLabel || '').trim() || 'Задание')
         : ((TASK_TYPES.find(x => x.type === t.type) || {}).label || t.type);
-      return { id: uid('t'), type: t.type, label, total, completed: mk(total, done) };
+      // Сохраняем сами отметки, а не их количество: иначе правка названия
+      // предмета сбрасывала бы пометки «готово» и порядок сданных работ.
+      const prev = Array.isArray(t.origCompleted) ? t.origCompleted : [];
+      const completed = Array.from({ length: total }, (_, i) => {
+        const v = prev[i];
+        return segIsDone(v) ? true : segIsReady(v) ? SEG_READY : false;
+      });
+      return { id: uid('t'), type: t.type, label, total, completed };
     });
     const tasks = built.length ? built : [{ id: uid('t'), type: 'flask', label: 'Лабораторные', total: 4, completed: mk(4, 0) }];
     const sess = state.sessions.find(s => s.id === sid);
     if (!sess) return setState({ showAddModal: false, editSubjectId: null });
     const examLink = d.examLink || null;
+    const lessonLink = resolveLessonLink(d).trim() || null;
     if (state.editSubjectId) {
       const sub = sess.subjects.find(s => s.id === state.editSubjectId);
       if (sub) {
@@ -1864,12 +2587,13 @@ const actions = {
         sub.meta = d.teacher.trim() || 'Преподаватель';
         sub.autoType = d.autoType || 'auto';
         sub.examLink = examLink;
+        sub.lessonLink = lessonLink;
         sub.tasks = tasks;
       }
     } else {
       sess.subjects.push({
         id: uid('subj'), name: d.name.trim(), meta: d.teacher.trim() || 'Преподаватель',
-        autoType: d.autoType || 'auto', examLink, tasks,
+        autoType: d.autoType || 'auto', examLink, lessonLink, tasks,
       });
     }
     setState({ showAddModal: false, editSubjectId: null });
@@ -1927,6 +2651,35 @@ const actions = {
     state.userExams[g] = [...state.userExams[g], item];
     setState({ showExamModal: false });
   },
+  openGroupsModal: () => setUI({ showGroupsModal: true, groupDraft: '' }),
+  closeGroupsModal: () => setUI({ showGroupsModal: false, groupDraft: '' }),
+  submitGroup: () => {
+    const title = (state.groupDraft || '').trim();
+    if (!title) return;
+    if (examGroups().some(g => csvNorm(g.title) === csvNorm(title))) return;
+    const item = { id: uid('ug'), title };
+    state.userGroups = [...(state.userGroups || []), item];
+    setState({ groupDraft: '', examGroup: item.id });
+  },
+  deleteGroup: (el) => {
+    const id = el.dataset.groupId;
+    const g = (state.userGroups || []).find(x => x.id === id);
+    if (!g) return;
+    const count = groupExamList(id).length;
+    askConfirm({
+      title: 'Удалить группу?',
+      message: count
+        ? `Вместе с «${g.title}» удалится ${count} ${plural(count, ['запись', 'записи', 'записей'])} об экзаменах.`
+        : `Группа «${g.title}» будет удалена.`,
+      confirmLabel: 'Удалить',
+    }, () => {
+      state.userGroups = (state.userGroups || []).filter(x => x.id !== id);
+      if (state.userExams) delete state.userExams[id];
+      if (state.examGroup === id) state.examGroup = DEFAULT_EXAM_GROUPS[0] ? DEFAULT_EXAM_GROUPS[0].id : null;
+      setState({});
+    });
+  },
+
   restoreExams: () => {
     const g = state.examGroup;
     if (!g) return;
@@ -1968,9 +2721,12 @@ const inputHandlers = {
   taskTotal: (v, el) => { const t = state.draft.tasks.find(t => t.id === el.dataset.taskId); if (t) t.total = v.replace(/[^0-9]/g, ''); },
   taskCustom: (v, el) => { const t = state.draft.tasks.find(t => t.id === el.dataset.taskId); if (t) t.customLabel = v; },
   examLink: (v) => { state.draft.examLink = v; },
+  lessonLink: (v) => { state.draft.lessonLink = v; state.draft.lessonTouched = true; render(); },
+  subjectSort: (v) => { setState({ subjectSort: v }); },
   examGroupSelect: (v) => { setState({ examGroup: v || null }); },
   sessionName: (v) => { state.sessionDraft.name = v; updateSubmitState('sess-name'); },
   sessionPeriod: (v) => { state.sessionDraft.period = v; },
+  groupDraft: (v) => { state.groupDraft = v; render(); },
   examDraftName: (v) => { state.examDraft.name = v; updateSubmitState('exam-name'); },
   examDraftDate: (v) => { state.examDraft.date = v; },
   oguDivision: (v) => { oguLoadCourses(Number(v), 2); },
@@ -1993,11 +2749,17 @@ function updateSubmitState(_srcId) {
 }
 
 root.addEventListener('click', (e) => {
+  if (segSuppressClick) { segSuppressClick = false; return; }
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
   if (actionEl.classList.contains('modal-overlay') && e.target !== actionEl) return;
   const a = actionEl.dataset.action;
-  if (actions[a]) { e.preventDefault(); actions[a](actionEl); }
+  if (actions[a]) {
+    e.preventDefault();
+    const before = dataSnapshot();
+    actions[a](actionEl);
+    recordHistory(before);
+  }
 });
 
 root.addEventListener('keydown', (e) => {
@@ -2006,7 +2768,11 @@ root.addEventListener('keydown', (e) => {
   if (!el) return;
   e.preventDefault();
   const a = el.dataset.action;
-  if (actions[a]) actions[a](el);
+  if (actions[a]) {
+    const before = dataSnapshot();
+    actions[a](el);
+    recordHistory(before);
+  }
 });
 
 root.addEventListener('input', (e) => {
@@ -2020,13 +2786,23 @@ root.addEventListener('change', (e) => {
   const el = e.target.closest('[data-input]');
   if (!el) return;
   const name = el.dataset.input;
-  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup', 'examLink', 'examGroupSelect', 'examDraftDate'].includes(name)) {
+  if (['taskType', 'oguDivision', 'oguCourse', 'oguGroup', 'examLink', 'lessonLink', 'subjectSort', 'examGroupSelect', 'examDraftDate'].includes(name)) {
     const h = inputHandlers[name];
     if (h) h(el.value, el);
   }
 });
 
 document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y' ||
+      e.key === 'я' || e.key === 'Я' || e.key === 'н' || e.key === 'Н')) {
+    // В полях ввода Ctrl+Z должен отменять текст, а не действие в приложении.
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    e.preventDefault();
+    const redo = e.key === 'y' || e.key === 'Y' || e.key === 'н' || e.key === 'Н' || e.shiftKey;
+    if (redo) redoLast(); else undoLast();
+    return;
+  }
   if (e.key === 'Escape') {
     if (state.examReminders && state.examReminders.length) actions.dismissReminders();
     else if (state.undo) actions.dismissUndo();
@@ -2034,10 +2810,92 @@ document.addEventListener('keydown', (e) => {
     else if (state.showAddModal) actions.closeAddModal();
     else if (state.showSessionModal) actions.closeSessionModal();
     else if (state.showExamModal) actions.closeExamModal();
+    else if (state.showGroupsModal) actions.closeGroupsModal();
     else if (state.showImportModal) actions.closeImportModal();
+    else if (state.csvPreview) actions.closeCsvModal();
     else if (state.update && state.update.status === 'available') actions.dismissUpdate();
     else if (state.showThemeMenu) actions.closeThemeMenu();
   }
+});
+
+// Windows переключили между светлой и тёмной — перерисовываемся, но только
+// если выбрана автотема, иначе явный выбор пользователя менять нельзя.
+if (window.matchMedia) {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onOsThemeChange = () => { if (AUTO_THEMES[state.themeId]) render(); };
+  if (mq.addEventListener) mq.addEventListener('change', onOsThemeChange);
+  else if (mq.addListener) mq.addListener(onOsThemeChange);
+}
+
+// ─── Протяжка по сегментам ──────────────────────────────────────────────────
+// Зажал на сегменте и провёл — отмечаются все, через которые прошёл курсор.
+// Во время протяжки не перерисовываем приложение: render() пересобирает весь
+// DOM, и элементы под курсором исчезали бы прямо посреди жеста. Поэтому
+// правим state и подкрашиваем сегменты напрямую, а перерисовка — один раз в
+// конце. Обычный клик сюда не попадает: жест начинается со второго сегмента.
+let segDrag = null;
+let segSuppressClick = false;
+
+function segTargetFrom(el) {
+  const sess = state.sessions.find(s => s.id === state.currentSessionId);
+  if (!sess) return null;
+  const sub = sess.subjects.find(s => s.id === el.dataset.subjectId);
+  if (!sub) return null;
+  const task = sub.tasks.find(t => t.id === el.dataset.taskId);
+  if (!task) return null;
+  return { sub, task, index: Number(el.dataset.index) };
+}
+
+function segApply(el) {
+  const t = segTargetFrom(el);
+  if (!t) return;
+  const key = el.dataset.subjectId + '|' + el.dataset.taskId + '|' + el.dataset.index;
+  if (segDrag.touched.has(key)) return;
+  segDrag.touched.add(key);
+  // Протяжка работает только между «сдано» и «не сдано»: тянуть третье
+  // состояние жестом неудобно, для него есть клик.
+  if (segIsDone(t.task.completed[t.index]) === segDrag.value) return;
+  t.task.completed[t.index] = segDrag.value;
+  bumpActivity(segDrag.value ? 1 : -1);
+  segDrag.changed = true;
+  el.style.background = segDrag.value
+    ? (subjectClosed(t.sub) ? 'var(--good)' : 'var(--accent)')
+    : 'var(--seg-empty)';
+}
+
+root.addEventListener('pointerdown', (e) => {
+  segSuppressClick = false; // если прошлый жест не породил click, флаг не должен зависнуть
+  if (e.button !== 0) return;
+  const el = e.target.closest('.seg');
+  if (!el) return;
+  const t = segTargetFrom(el);
+  if (!t) return;
+  segDrag = { value: !segIsDone(t.task.completed[t.index]), origin: el, touched: new Set(), changed: false, moved: false, before: dataSnapshot() };
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!segDrag) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const seg = el && el.closest ? el.closest('.seg') : null;
+  if (!seg || seg === segDrag.origin) return;
+  if (!segDrag.moved) {
+    segDrag.moved = true;
+    segApply(segDrag.origin); // стартовый сегмент отмечаем, только когда жест состоялся
+  }
+  segApply(seg);
+});
+
+document.addEventListener('pointerup', () => {
+  if (!segDrag) return;
+  const { changed, before } = segDrag;
+  segDrag = null;
+  if (!changed) return; // жеста не было — сработает обычный клик
+  // Отпускание над тем же сегментом, с которого начали, породит click и
+  // перевернёт его обратно — гасим этот клик.
+  segSuppressClick = true;
+  lastToggledSegKey = null;
+  setState({});
+  recordHistory(before);
 });
 
 function hideSplash() {
