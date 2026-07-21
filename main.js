@@ -113,7 +113,12 @@ ipcMain.handle('update:download', () => {
 });
 
 ipcMain.handle('update:install', () => {
-  if (app.isPackaged) autoUpdater.quitAndInstall(true, true);
+  if (!app.isPackaged) return;
+  // Снимаем обработчик выхода и закрываем окна сами, иначе установщик ждёт,
+  // пока приложение освободит файлы, — из-за этого перезапуск тянется долго.
+  app.removeAllListeners('window-all-closed');
+  for (const w of BrowserWindow.getAllWindows()) w.destroy();
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
 });
 
 ipcMain.handle('data:load', () => readData());

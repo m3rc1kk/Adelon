@@ -510,8 +510,7 @@ function updateModalHtml() {
         </div>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:2px;">
-        <button class="ghost-btn" data-action="dismissUpdate">Позже</button>
-        <button class="primary-btn" data-action="downloadUpdate" style="display:flex;align-items:center;gap:7px;">${icon('download', 16)}Скачать и установить</button>
+        <button class="primary-btn" data-action="downloadUpdate" style="display:flex;align-items:center;gap:7px;">${icon('download', 16)}Скачать</button>
       </div>
     </div>
   </div>`;
@@ -557,10 +556,7 @@ function updateToastHtml() {
        </div>`;
 
   const footer = ready
-    ? `<div style="display:flex;gap:8px;justify-content:flex-end;">
-         <button class="ghost-btn" style="padding:8px 14px;font-size:13px;" data-action="dismissUpdate">Позже</button>
-         <button class="primary-btn" style="padding:8px 16px;font-size:13px;" data-action="installUpdate">Перезапустить</button>
-       </div>`
+    ? `<button class="primary-btn" style="width:100%;padding:9px 16px;font-size:13px;" data-action="installUpdate">Перезапустить</button>`
     : '';
 
   return `
@@ -841,24 +837,24 @@ function dashboardViewHtml() {
       <span style="font-size:11px;color:var(--text-3);white-space:nowrap;">${label}</span>
     </div>`;
   const progressCard = `
-    <div class="card ov-card b-prog" style="align-items:center;justify-content:space-between;text-align:center;gap:18px;padding:26px 24px;">
-      <span class="ov-eyebrow">Готовность семестра</span>
-      <div style="position:relative;width:168px;height:168px;flex-shrink:0;border-radius:50%;background:${ringFill(overallPct, allClosed)};display:flex;align-items:center;justify-content:center;">
-        <div style="width:132px;height:132px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
+    <div class="card ov-card b-prog" style="align-items:center;justify-content:space-between;text-align:center;gap:20px;">
+      <span style="font-family:'Onest';font-weight:500;font-size:14px;color:var(--text-2);">Готовность по всем семестрам</span>
+      <div style="position:relative;width:158px;height:158px;flex-shrink:0;border-radius:50%;background:${ringFill(overallPct, allClosed)};display:flex;align-items:center;justify-content:center;">
+        <div style="width:124px;height:124px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
           <span style="display:flex;align-items:baseline;gap:2px;">
-            <span style="font-family:'Golos Text';font-weight:700;font-size:48px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em;">${overallPct}</span>
-            <span style="font-size:20px;font-weight:600;color:var(--text-3);">%</span>
+            <span style="font-family:'Golos Text';font-weight:700;font-size:42px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em;">${overallPct}</span>
+            <span style="font-size:18px;font-weight:600;color:var(--text-3);">%</span>
           </span>
         </div>
       </div>
       <div style="display:flex;align-items:stretch;gap:4px;width:100%;">
-        ${progStat(`${doneU}/${totalU}`, 'задания')}
+        ${progStat(`${doneU}/${totalU}`, plural(totalU, ['задание', 'задания', 'заданий']))}
         <div style="width:1px;background:var(--border);margin:2px 0;"></div>
         ${progStat(`${closedCount}/${total}`, 'закрыто')}
         <div style="width:1px;background:var(--border);margin:2px 0;"></div>
         ${progStat(sessions.length, plural(sessions.length, ['семестр', 'семестра', 'семестров']))}
       </div>
-      <div style="width:100%;display:flex;flex-direction:column;gap:9px;">
+      <div style="width:100%;display:flex;flex-direction:column;gap:11px;">
         <div style="height:1px;background:var(--border);"></div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;">${heroDots}</div>
       </div>
@@ -924,7 +920,7 @@ function dashboardViewHtml() {
     <div class="card ov-card b-exams">
       <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('cap', 16)}</span><span class="ov-card-title">Ближайшие экзамены</span>${upcoming.length ? `<span class="ov-card-count">${upcoming.length}</span>` : ''}</div>
       ${upcoming.length
-        ? `<div style="display:flex;flex-direction:column;margin:-4px 0;">${examRows}</div>`
+        ? `<div style="display:flex;flex-direction:column;margin:-4px 0 0;">${examRows}</div>`
         : `<span style="font-size:13px;color:var(--text-3);line-height:1.5;">Нет предстоящих с датой${state.examGroup ? ` для группы ${esc(examGroupTitle(state.examGroup))}` : ''}.</span>`}
     </div>`;
 
@@ -1087,14 +1083,14 @@ function activityHeatmapHtml(extraClass) {
     </div>`;
 
   return `
-  <div class="card ov-heat ${extraClass || ''}" style="padding:22px 24px;display:flex;flex-direction:column;gap:14px;min-width:0;">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  <div class="card ov-card ov-heat ${extraClass || ''}">
+    <div class="ov-card-head" style="flex-wrap:wrap;">
       <span class="ov-card-ic" aria-hidden="true">${icon('grid', 16)}</span>
-      <span style="font-family:'Onest';font-weight:600;font-size:15px;color:var(--text);letter-spacing:-.01em;">Активность</span>
+      <span class="ov-card-title">Активность</span>
       <span style="font-size:12.5px;color:var(--text-3);">${total} ${plural(total, ['отметка', 'отметки', 'отметок'])} за ~4 месяца</span>
       ${streak > 0 ? `<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--accent-2);background:var(--accent-soft);padding:3px 10px;border-radius:99px;white-space:nowrap;">${streak} ${plural(streak, ['день', 'дня', 'дней'])} подряд</span>` : ''}
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px;">
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:6px;">
       <div class="heat-months" style="grid-template-columns:repeat(${WEEKS},1fr);">${months}</div>
       <div class="heat-grid" style="grid-template-columns:repeat(${WEEKS},1fr);">${cells}</div>
     </div>
