@@ -291,6 +291,7 @@ function icon(name, size) {
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
     upload: '<path d="M12 15.5V5"/><path d="M8 9l4-4 4 4"/><path d="M5 19.5h14"/>',
     clock: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.4V12l3 1.8"/>',
+    grip: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
     sheet: '<rect x="4" y="4" width="16" height="16" rx="2.2"/><path d="M4 9.5h16"/><path d="M9.5 9.5V20"/><path d="M4 15h16"/>',
   };
   return open + (P[name] || P.plus) + '</svg>';
@@ -1035,37 +1036,38 @@ function dashboardViewHtml() {
     name: su.name, sessName: s.name, sessId: s.id, pct: subjectPct(su), closed: subjectClosed(su),
   }))).filter(r => !r.closed).sort((a, b) => a.pct - b.pct || collator.compare(a.name, b.name));
 
-  // ── Плитка-герой: общий прогресс ──
-  const heroDots = subjects.map(su => {
-    const c = subjectClosed(su) ? 'var(--good)' : (subjectPct(su) > 0 ? 'var(--accent)' : 'var(--border-strong)');
-    return `<span style="width:9px;height:9px;border-radius:50%;background:${c};" title="${esc(su.name)} — ${subjectClosed(su) ? 'закрыт' : subjectPct(su) + '%'}"></span>`;
-  }).join('');
-  const progStat = (val, label) => `
-    <div style="display:flex;flex-direction:column;gap:3px;align-items:center;flex:1;">
-      <span style="font-family:'Golos Text';font-weight:700;font-size:19px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;">${val}</span>
-      <span style="font-size:11px;color:var(--text-3);white-space:nowrap;">${label}</span>
+  // ── Плитка-герой: общая готовность ──
+  // Всё выровнено по одной сетке: показатель и полоса во всю ширину, ниже
+  // четыре равные ячейки. Ничего пропорционального, поэтому блок выглядит
+  // одинаково ровно при любом количестве семестров.
+  const leftWorks = Math.max(0, totalU - doneU);
+  let startedCount = 0, idleCount = 0;
+  for (const su of subjects) {
+    if (subjectClosed(su)) continue;
+    if (subjectPct(su) > 0) startedCount++; else idleCount++;
+  }
+  const heroCell = (value, label) => `
+    <div class="hero-cell">
+      <b>${value}</b>
+      <span>${label}</span>
     </div>`;
+
   const progressCard = `
-    <div class="card ov-card b-prog" style="align-items:center;justify-content:space-between;text-align:center;gap:20px;">
-      <span style="font-family:'Onest';font-weight:500;font-size:14px;color:var(--text-2);">Готовность по всем семестрам</span>
-      <div style="position:relative;width:158px;height:158px;flex-shrink:0;border-radius:50%;background:${ringFill(overallPct, allClosed)};display:flex;align-items:center;justify-content:center;">
-        <div style="width:124px;height:124px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;">
-          <span style="display:flex;align-items:baseline;gap:2px;">
-            <span style="font-family:'Golos Text';font-weight:700;font-size:42px;color:var(--text);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.02em;">${overallPct}</span>
-            <span style="font-size:18px;font-weight:600;color:var(--text-3);">%</span>
-          </span>
-        </div>
+    <div class="card ov-card b-prog">
+      <div class="ov-card-head">
+        <span class="ov-card-ic" aria-hidden="true">${icon('target', 16)}</span>
+        <span class="ov-card-title">Готовность</span>
       </div>
-      <div style="display:flex;align-items:stretch;gap:4px;width:100%;">
-        ${progStat(`${doneU}/${totalU}`, plural(totalU, ['задание', 'задания', 'заданий']))}
-        <div style="width:1px;background:var(--border);margin:2px 0;"></div>
-        ${progStat(`${closedCount}/${total}`, 'закрыто')}
-        <div style="width:1px;background:var(--border);margin:2px 0;"></div>
-        ${progStat(sessions.length, plural(sessions.length, ['семестр', 'семестра', 'семестров']))}
+      <div class="hero-main">
+        <div class="hero-big">${overallPct}<i>%</i></div>
+        <div class="hero-bar"><div class="hero-bar-fill" style="width:${overallPct}%;"></div></div>
+        <div class="hero-caption">Сдано ${doneU} из ${totalU} ${plural(totalU, ['работы', 'работ', 'работ'])}</div>
       </div>
-      <div style="width:100%;display:flex;flex-direction:column;gap:11px;">
-        <div style="height:1px;background:var(--border);"></div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:center;">${heroDots}</div>
+      <div class="hero-grid">
+        ${heroCell(leftWorks, plural(leftWorks, ['работа осталась', 'работы осталось', 'работ осталось']))}
+        ${heroCell(`${closedCount}/${total}`, 'предметов закрыто')}
+        ${heroCell(startedCount, 'в работе')}
+        ${heroCell(idleCount, 'ещё не начаты')}
       </div>
     </div>`;
 
@@ -1508,6 +1510,9 @@ function subjectsViewHtml() {
   const allSubjects = (current ? current.subjects : []);
   const subjects = arrangeSubjects(allSubjects);
   const hiddenByFilter = allSubjects.length - subjects.length;
+  // Ручной порядок можно менять только когда он и показывается: при сортировке
+  // по прогрессу или названию перетаскивание ничего бы не изменило на экране.
+  const canReorder = state.subjectSort === 'manual' && allSubjects.length > 1;
 
   const subjectCards = subjects.map(s => {
     const L = AUTO_TYPES.find(a => a.value === (s.autoType || 'auto')) || AUTO_TYPES[0];
@@ -1566,7 +1571,7 @@ function subjectsViewHtml() {
     }).join('');
 
     return `
-    <div class="card" style="padding:var(--card-pad);display:flex;flex-direction:column;gap:var(--card-gap);position:relative;">
+    <div class="card subject-card" data-subject-id="${esc(s.id)}" style="padding:var(--card-pad);display:flex;flex-direction:column;gap:var(--card-gap);position:relative;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
         <div style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;">
           <div style="font-family:'Onest';font-weight:600;font-size:18px;letter-spacing:-.015em;color:var(--text);line-height:1.2;overflow-wrap:anywhere;">${esc(s.name)}</div>
@@ -1588,6 +1593,7 @@ function subjectsViewHtml() {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
           <span style="font-size:12px;color:var(--text-3);min-width:0;overflow-wrap:anywhere;">${footerText}</span>
           <div style="display:flex;gap:4px;flex-shrink:0;">
+            ${canReorder ? `<button class="mini-icon-btn subj-grip" draggable="true" data-subject-id="${esc(s.id)}" title="Перетащить, чтобы изменить порядок" style="width:30px;height:30px;cursor:grab;">${icon('grip', 15)}</button>` : ''}
             <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="openEditModal" data-subject-id="${esc(s.id)}" title="Редактировать предмет">${icon('edit', 15)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;${examPassed ? 'background:var(--good-soft);color:var(--good);' : ''}" data-action="toggleExam" data-subject-id="${esc(s.id)}" title="${examPassed ? 'Отменить: экзамен не сдан' : 'Закрыть предмет: экзамен сдан'}">${icon('cap', 16)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="deleteSubject" data-subject-id="${esc(s.id)}" title="Удалить предмет">${icon('trash', 15)}</button>
@@ -2896,6 +2902,74 @@ document.addEventListener('pointerup', () => {
   lastToggledSegKey = null;
   setState({});
   recordHistory(before);
+});
+
+// ─── Перетаскивание предметов ───────────────────────────────────────────────
+// Тянем за ручку, а не за карточку целиком: внутри карточки живут сегменты со
+// своим жестом протяжки, и они бы конфликтовали. Порядок меняем в исходном
+// массиве, переставляя предмет вплотную к тому, на который бросили, — поэтому
+// скрытые фильтром предметы остаются на своих местах.
+let subjDragId = null;
+
+function clearDropMarks() {
+  for (const el of document.querySelectorAll('.subj-drop-before,.subj-drop-after')) {
+    el.classList.remove('subj-drop-before', 'subj-drop-after');
+  }
+}
+
+function reorderSubjects(draggedId, targetId, after) {
+  const sess = state.sessions.find(s => s.id === state.currentSessionId);
+  if (!sess || draggedId === targetId) return false;
+  const from = sess.subjects.findIndex(s => s.id === draggedId);
+  if (from === -1) return false;
+  const [moved] = sess.subjects.splice(from, 1);
+  const to = sess.subjects.findIndex(s => s.id === targetId);
+  if (to === -1) { sess.subjects.splice(from, 0, moved); return false; }
+  sess.subjects.splice(after ? to + 1 : to, 0, moved);
+  return true;
+}
+
+root.addEventListener('dragstart', (e) => {
+  const grip = e.target.closest('.subj-grip');
+  if (!grip) { e.preventDefault(); return; }
+  subjDragId = grip.dataset.subjectId;
+  const card = grip.closest('.subject-card');
+  if (card) card.classList.add('subj-dragging');
+  if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', subjDragId); }
+});
+
+root.addEventListener('dragover', (e) => {
+  if (!subjDragId) return;
+  const card = e.target.closest('.subject-card');
+  if (!card || card.dataset.subjectId === subjDragId) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  const r = card.getBoundingClientRect();
+  const after = e.clientX > r.left + r.width / 2;
+  clearDropMarks();
+  card.classList.add(after ? 'subj-drop-after' : 'subj-drop-before');
+});
+
+root.addEventListener('drop', (e) => {
+  if (!subjDragId) return;
+  const card = e.target.closest('.subject-card');
+  if (!card) return;
+  e.preventDefault();
+  const r = card.getBoundingClientRect();
+  const after = e.clientX > r.left + r.width / 2;
+  const before = dataSnapshot();
+  const changed = reorderSubjects(subjDragId, card.dataset.subjectId, after);
+  subjDragId = null;
+  clearDropMarks();
+  if (!changed) return;
+  setState({});
+  recordHistory(before);
+});
+
+root.addEventListener('dragend', () => {
+  subjDragId = null;
+  clearDropMarks();
+  for (const el of document.querySelectorAll('.subj-dragging')) el.classList.remove('subj-dragging');
 });
 
 function hideSplash() {
