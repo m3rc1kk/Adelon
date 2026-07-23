@@ -157,6 +157,7 @@ const state = {
   showImportModal: false,
   csvPreview: null,
   csvBusy: false,
+  imgBusy: false,
   showSearchModal: false,
   searchQuery: '',
   notice: null,
@@ -253,6 +254,30 @@ function subjectUnits(sub) {
   return { done, total: total || 1 };
 }
 
+// ─── Клонирование ───────────────────────────────────────────────────────────
+// Копируем структуру — названия, типы и количество работ, — но не отметки:
+// клон нужен, чтобы начать заново с той же раскладкой, а не продублировать
+// уже сделанное. Поэтому completed заполняется нулями, а экзамен снимается.
+function cloneSubjectData(sub, keepName, taken) {
+  return {
+    ...sub,
+    id: uid('sub'),
+    name: keepName ? sub.name : copyName(sub.name, taken),
+    examPassed: false,
+    tasks: (sub.tasks || []).map(t => ({ ...t, id: uid('t'), completed: mk(t.total, 0) })),
+  };
+}
+
+// «Физика» → «Физика (копия)» → «Физика (копия 2)»: если имя занято, добавляем номер.
+function copyName(name, taken) {
+  const base = `${name} (копия)`;
+  const list = taken || [];
+  if (!list.includes(base)) return base;
+  let n = 2;
+  while (list.includes(`${name} (копия ${n})`)) n++;
+  return `${name} (копия ${n})`;
+}
+
 // Отмечает активность за сегодня для тепловой карты (delta +1 при отметке, −1 при снятии).
 function bumpActivity(delta) {
   const key = dateKey(new Date());
@@ -292,6 +317,8 @@ function icon(name, size) {
     alert: '<path d="M12 4.5l8 14.5H4L12 4.5z"/><path d="M12 10.5v4"/><path d="M12 17.5h.01"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2.2"/><path d="M15 6.5A1.5 1.5 0 0 0 13.5 5H6a1.5 1.5 0 0 0-1.5 1.5V14A1.5 1.5 0 0 0 6 15.5"/>',
+    image: '<rect x="3.5" y="5" width="17" height="14" rx="2.2"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17l4.5-4.2 3 2.6 3-2.6L19 16"/>',
     upload: '<path d="M12 15.5V5"/><path d="M8 9l4-4 4 4"/><path d="M5 19.5h14"/>',
     clock: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.4V12l3 1.8"/>',
     grip: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
@@ -769,6 +796,31 @@ function lessonStartMin(l) {
   if (l.time) { const m = timeToMin(l.time.split(/[–-]/)[0]); if (m != null) return m; }
   return PAIR_STARTS[l.pair] || 9999;
 }
+// ─── «Сейчас идёт пара» ─────────────────────────────────────────────────────
+// Границы пары берём из её времени, а когда его нет — из номера пары плюс
+// стандартные 90 минут: расписание ОГУ иногда отдаёт занятие без интервала.
+const PAIR_LEN_MIN = 90;
+
+function lessonRange(gr) {
+  const parts = String(gr.time || '').split(/[–-]/);
+  let start = timeToMin(parts[0]);
+  if (start == null) start = PAIR_STARTS[gr.pair] != null ? PAIR_STARTS[gr.pair] : null;
+  if (start == null) return null;
+  const end = (parts[1] && timeToMin(parts[1])) || start + PAIR_LEN_MIN;
+  return { start, end };
+}
+
+// Возвращает, сколько минут осталось до конца, если пара идёт прямо сейчас.
+function lessonNowLeft(gr, date) {
+  const now = new Date();
+  if (!sameDay(date, now)) return null;
+  const r = lessonRange(gr);
+  if (!r) return null;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  if (nowMin < r.start || nowMin >= r.end) return null;
+  return r.end - nowMin;
+}
+
 function groupDayLessons(lessons) {
   const bySlot = new Map();
   for (const l of lessons) {
@@ -1367,6 +1419,7 @@ function sessionsViewHtml() {
         ${badge}
         <div style="display:flex;align-items:center;gap:2px;flex-shrink:0;">
           <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="openEditSessionModal" data-session-id="${esc(sess.id)}" title="Редактировать семестр">${icon('edit', 14)}</button>
+          <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="cloneSession" data-session-id="${esc(sess.id)}" title="Дублировать семестр с теми же предметами">${icon('copy', 14)}</button>
           <button class="mini-icon-btn" style="width:28px;height:28px;" data-action="deleteSession" data-session-id="${esc(sess.id)}" title="Удалить семестр">${icon('trash', 14)}</button>
         </div>
       </div>
@@ -1613,6 +1666,7 @@ function subjectsViewHtml() {
           <div style="display:flex;gap:4px;flex-shrink:0;">
             ${canReorder ? `<button class="mini-icon-btn subj-grip" draggable="true" data-subject-id="${esc(s.id)}" title="Перетащить, чтобы изменить порядок" style="width:30px;height:30px;cursor:grab;">${icon('grip', 15)}</button>` : ''}
             <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="openEditModal" data-subject-id="${esc(s.id)}" title="Редактировать предмет">${icon('edit', 15)}</button>
+            <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="cloneSubject" data-subject-id="${esc(s.id)}" title="Дублировать предмет">${icon('copy', 15)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;${examPassed ? 'background:var(--good-soft);color:var(--good);' : ''}" data-action="toggleExam" data-subject-id="${esc(s.id)}" title="${examPassed ? 'Отменить: экзамен не сдан' : 'Закрыть предмет: экзамен сдан'}">${icon('cap', 16)}</button>
             <button class="mini-icon-btn" style="width:30px;height:30px;" data-action="deleteSubject" data-subject-id="${esc(s.id)}" title="Удалить предмет">${icon('trash', 15)}</button>
           </div>
@@ -1684,17 +1738,22 @@ function scheduleViewHtml() {
       <div style="display:flex;flex-direction:column;gap:10px;">
         ${groups.map((gr) => {
           const k = KINDS[gr.kind] || KINDS['лаб'];
+          const leftMin = lessonNowLeft(gr, date);
+          const nowBadge = leftMin != null
+            ? `<span class="lesson-now-badge"><span class="lesson-now-dot"></span>Идёт · ещё ${leftMin} мин</span>`
+            : '';
           const entriesHtml = gr.entries.map((en) => `
             <div style="display:flex;flex-direction:column;gap:4px;">
               ${en.teacher ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);"><span style="display:flex;color:var(--text-3);flex-shrink:0;">${icon('user', 13)}</span>${esc(en.teacher)}</div>` : ''}
               ${en.room ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);"><span style="display:flex;color:var(--text-3);flex-shrink:0;">${icon('pin', 13)}</span><span style="font-weight:600;color:var(--text);">${esc(en.room)}</span></div>` : ''}
             </div>`).join('<div style="height:1px;background:var(--border);margin:1px 0;"></div>');
           return `
-          <div class="card" style="padding:12px 13px;display:flex;flex-direction:column;gap:8px;">
+          <div class="card${leftMin != null ? ' lesson-now' : ''}" style="padding:12px 13px;display:flex;flex-direction:column;gap:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
               <span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:12.5px;font-weight:600;color:var(--accent);white-space:nowrap;">${esc(gr.time)}</span>
               ${gr.pair ? `<span style="font-size:11px;color:var(--text-3);white-space:nowrap;">${gr.pair} пара</span>` : ''}
             </div>
+            ${nowBadge}
             <span style="align-self:flex-start;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:6px;background:${k.bg};color:${k.color};">${esc(gr.kind)}</span>
             <span style="font-family:'Onest';font-weight:600;font-size:14px;letter-spacing:-.01em;color:var(--text);line-height:1.3;">${esc(gr.name)}</span>
             <div style="display:flex;flex-direction:column;gap:5px;margin-top:1px;">${entriesHtml}</div>
@@ -1739,6 +1798,7 @@ function scheduleViewHtml() {
       </div>
       <div style="display:flex;align-items:center;gap:8px;">
         <button class="ghost-btn" style="height:36px;padding:0 14px;font-family:'Onest';display:flex;align-items:center;gap:7px;" data-action="openImportModal">${icon('users', 15)}${g ? 'Сменить группу' : 'Выбрать группу'}</button>
+        <button class="icon-btn" data-action="exportScheduleImage" title="Сохранить неделю картинкой" ${state.imgBusy ? 'disabled' : ''}><span style="display:flex;${state.imgBusy ? 'opacity:.5;' : ''}">${icon('image', 16)}</span></button>
         ${refreshBtn}
         <div style="width:1px;height:22px;background:var(--border);margin:0 2px;"></div>
         <button class="icon-btn" data-action="prevWeek">${icon('chevron-left', 16)}</button>
@@ -1752,6 +1812,204 @@ function scheduleViewHtml() {
       </div>
     </div>
   </div>`;
+}
+
+// ─── Расписание картинкой ───────────────────────────────────────────────────
+// Рисуем вручную на canvas: внешних библиотек в проекте нет, а тащить их ради
+// одной кнопки незачем. Цвета берём из текущей темы, чтобы картинка выглядела
+// так же, как приложение на экране.
+// KINDS хранит цвета строками вида 'var(--accent-soft)', а канвасу нужны
+// конкретные значения — держим отдельную таблицу с именами переменных.
+const KIND_CANVAS = {
+  'лекция': { bg: '--accent-soft', fg: '--accent-2' },
+  'практика': { bg: '--good-soft', fg: '--good' },
+  'лаб': { bg: '--surface-2', fg: '--text-2' },
+  'дистанционно': { bg: '--surface-2', fg: '--text-2' },
+};
+
+function themeColor(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+function wrapText(ctx, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const probe = line ? line + ' ' + w : w;
+    if (ctx.measureText(probe).width <= maxWidth || !line) line = probe;
+    else { lines.push(line); line = w; }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+async function buildScheduleImage() {
+  const canvas = await drawScheduleCanvas();
+  return canvas.toDataURL('image/png');
+}
+
+async function drawScheduleCanvas() {
+  if (document.fonts && document.fonts.ready) { try { await document.fonts.ready; } catch (_) {} }
+
+  const S = 2; // ретина-масштаб: без него текст на картинке выглядит мылом
+  const COL_W = 260, GAP = 16, PAD = 40, HEAD_H = 110;
+  const cols = 6;
+  const width = PAD * 2 + COL_W * cols + GAP * (cols - 1);
+
+  const bg = themeColor('--bg', '#F4F1EB');
+  const surface = themeColor('--surface', '#fff');
+  const border = themeColor('--border', '#e2ded6');
+  const text = themeColor('--text', '#211d18');
+  const text2 = themeColor('--text-2', '#5a544b');
+  const text3 = themeColor('--text-3', '#8d867a');
+  const accent = themeColor('--accent', '#4E8158');
+  const accentSoft = themeColor('--accent-soft', '#e6efe7');
+
+  const baseMonday = mondayOf(new Date());
+  const off = state.weekOffset;
+  const dayDate = (i) => { const d = new Date(baseMonday); d.setDate(d.getDate() + i + off * 7); return d; };
+
+  // Первый проход — считаем высоту: она зависит от самого загруженного дня.
+  const probe = document.createElement('canvas').getContext('2d');
+  const days = [0, 1, 2, 3, 4, 5].map((i) => {
+    const date = dayDate(i);
+    const groups = groupDayLessons(state.schedule[dateKey(date)] || []);
+    const cards = groups.map((gr) => {
+      probe.font = `600 15px Onest, system-ui, sans-serif`;
+      const nameLines = wrapText(probe, gr.name, COL_W - 28);
+      const rows = [];
+      for (const en of gr.entries) {
+        if (en.teacher) rows.push(en.teacher);
+        if (en.room) rows.push('Ауд. ' + en.room);
+      }
+      const h = 14 + 18 + 10 + 22 + nameLines.length * 20 + (rows.length ? 6 + rows.length * 18 : 0) + 14;
+      return { gr, nameLines, rows, h };
+    });
+    return { date, cards };
+  });
+  const colH = days.map(d => d.cards.reduce((a, c) => a + c.h + 12, 0));
+  const bodyH = Math.max(120, ...colH);
+  const height = PAD * 2 + HEAD_H + 46 + bodyH;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width * S;
+  canvas.height = height * S;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(S, S);
+  ctx.textBaseline = 'top';
+
+  const roundRect = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, width, height);
+
+  const d0 = dayDate(0), d5 = dayDate(5);
+  const rangeText = d0.getMonth() === d5.getMonth()
+    ? `${d0.getDate()}–${d5.getDate()} ${RU_MONTHS[d0.getMonth()]} ${d0.getFullYear()}`
+    : `${d0.getDate()} ${RU_MONTHS[d0.getMonth()]} – ${d5.getDate()} ${RU_MONTHS[d5.getMonth()]} ${d5.getFullYear()}`;
+
+  ctx.fillStyle = text;
+  ctx.font = `600 32px Onest, system-ui, sans-serif`;
+  ctx.fillText('Расписание', PAD, PAD);
+  ctx.fillStyle = text2;
+  ctx.font = `400 17px 'Golos Text', system-ui, sans-serif`;
+  ctx.fillText(rangeText + (state.oguGroup ? ` · группа ${state.oguGroup.groupTitle}` : ''), PAD, PAD + 44);
+
+  const today = new Date();
+  days.forEach((day, i) => {
+    const x = PAD + i * (COL_W + GAP);
+    let y = PAD + HEAD_H;
+    const isToday = sameDay(day.date, today);
+
+    roundRect(x, y, COL_W, 46, 12);
+    ctx.fillStyle = isToday ? accentSoft : surface;
+    ctx.fill();
+    ctx.fillStyle = isToday ? accent : text;
+    ctx.font = `600 15px Onest, system-ui, sans-serif`;
+    ctx.fillText(WEEKDAYS[i], x + 14, y + 9);
+    ctx.fillStyle = isToday ? accent : text3;
+    ctx.font = `400 13px 'Golos Text', system-ui, sans-serif`;
+    ctx.fillText(`${day.date.getDate()} ${RU_MONTHS[day.date.getMonth()]}`, x + 14, y + 27);
+    y += 46 + 12;
+
+    if (!day.cards.length) {
+      roundRect(x, y, COL_W, 60, 12);
+      ctx.strokeStyle = border;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = text3;
+      ctx.font = `400 13px 'Golos Text', system-ui, sans-serif`;
+      ctx.fillText('Нет пар', x + COL_W / 2 - ctx.measureText('Нет пар').width / 2, y + 22);
+      return;
+    }
+
+    for (const c of day.cards) {
+      roundRect(x, y, COL_W, c.h, 12);
+      ctx.fillStyle = surface;
+      ctx.fill();
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      let ty = y + 14;
+      ctx.fillStyle = accent;
+      ctx.font = `600 14px 'Golos Text', system-ui, sans-serif`;
+      ctx.fillText(c.gr.time || '', x + 14, ty);
+      if (c.gr.pair) {
+        ctx.fillStyle = text3;
+        ctx.font = `400 12px 'Golos Text', system-ui, sans-serif`;
+        const lbl = c.gr.pair + ' пара';
+        ctx.fillText(lbl, x + COL_W - 14 - ctx.measureText(lbl).width, ty + 1);
+      }
+      ty += 18 + 10;
+
+      const kindLabel = String(c.gr.kind || '').toUpperCase();
+      if (kindLabel) {
+        const kc = KIND_CANVAS[c.gr.kind] || KIND_CANVAS['лаб'];
+        ctx.font = `600 11px 'Golos Text', system-ui, sans-serif`;
+        const tw = ctx.measureText(kindLabel).width;
+        roundRect(x + 14, ty - 3, tw + 16, 20, 6);
+        ctx.fillStyle = themeColor(kc.bg, '#eee');
+        ctx.fill();
+        ctx.fillStyle = themeColor(kc.fg, '#555');
+        ctx.fillText(kindLabel, x + 22, ty + 2);
+      }
+      ty += 22;
+
+      ctx.fillStyle = text;
+      ctx.font = `600 15px Onest, system-ui, sans-serif`;
+      for (const line of c.nameLines) { ctx.fillText(line, x + 14, ty); ty += 20; }
+
+      if (c.rows.length) {
+        ty += 6;
+        ctx.fillStyle = text2;
+        ctx.font = `400 13px 'Golos Text', system-ui, sans-serif`;
+        for (const r of c.rows) {
+          const fit = wrapText(ctx, r, COL_W - 28)[0] || r;
+          ctx.fillText(fit, x + 14, ty);
+          ty += 18;
+        }
+      }
+      y += c.h + 12;
+    }
+  });
+
+  ctx.fillStyle = text3;
+  ctx.font = `400 12px 'Golos Text', system-ui, sans-serif`;
+  ctx.fillText('Adelon', PAD, height - PAD + 6);
+
+  return canvas;
 }
 
 function addModalHtml() {
@@ -2469,6 +2727,32 @@ const actions = {
     if (rect) fireConfetti(rect.left + rect.width / 2, rect.top + rect.height / 2);
   },
 
+  cloneSubject: (el) => {
+    const sess = state.sessions.find(s => s.id === state.currentSessionId);
+    if (!sess) return;
+    const idx = sess.subjects.findIndex(s => s.id === el.dataset.subjectId);
+    if (idx === -1) return;
+    const copy = cloneSubjectData(sess.subjects[idx], false, sess.subjects.map(s => s.name));
+    sess.subjects.splice(idx + 1, 0, copy);
+    setState({});
+    showNotice(`Предмет «${copy.name}» создан`);
+  },
+
+  cloneSession: (el) => {
+    const idx = state.sessions.findIndex(s => s.id === el.dataset.sessionId);
+    if (idx === -1) return;
+    const src = state.sessions[idx];
+    const copy = {
+      id: uid('sess'),
+      name: copyName(src.name, state.sessions.map(s => s.name)),
+      period: src.period,
+      subjects: (src.subjects || []).map(su => cloneSubjectData(su, true)),
+    };
+    state.sessions.splice(idx + 1, 0, copy);
+    setState({});
+    showNotice(`Семестр «${copy.name}» создан — прогресс обнулён`);
+  },
+
   deleteSession: (el) => {
     const id = el.dataset.sessionId;
     const idx = state.sessions.findIndex(s => s.id === id);
@@ -2582,6 +2866,24 @@ const actions = {
       setUI({ csvPreview: analyzeCsv(res.text, res.name) });
     } finally {
       setUI({ csvBusy: false });
+    }
+  },
+  exportScheduleImage: async () => {
+    if (state.imgBusy) return;
+    const file = window.adelon && window.adelon.file;
+    if (!file || !file.saveImage) { showNotice('Сохранение картинки доступно только в приложении.', 'warn'); return; }
+    setUI({ imgBusy: true });
+    try {
+      const dataUrl = await buildScheduleImage();
+      const d = mondayOf(new Date());
+      d.setDate(d.getDate() + state.weekOffset * 7);
+      const res = await file.saveImage(`raspisanie-${dateKey(d)}.png`, dataUrl);
+      if (res && res.ok) showNotice(`Расписание сохранено: ${res.name}`);
+      else if (res && res.error) showNotice('Не удалось сохранить картинку: ' + res.error, 'warn');
+    } catch (err) {
+      showNotice('Не удалось нарисовать картинку: ' + String(err && err.message || err), 'warn');
+    } finally {
+      setUI({ imgBusy: false });
     }
   },
   closeCsvModal: () => setUI({ csvPreview: null }),
@@ -2909,6 +3211,19 @@ if (window.matchMedia) {
   if (mq.addEventListener) mq.addEventListener('change', onOsThemeChange);
   else if (mq.addListener) mq.addListener(onOsThemeChange);
 }
+
+// Счётчик «осталось N мин» у текущей пары иначе застынет на времени отрисовки.
+// Перерисовываем только открытое расписание текущей недели и только когда на
+// экране нет окон: полный ре-рендер посреди ввода сбил бы набранный текст.
+const anyModalOpen = () => !!(state.showAddModal || state.showSessionModal || state.showExamModal
+  || state.showGroupsModal || state.showImportModal || state.showSearchModal
+  || state.showLessonModal || state.csvPreview || state.confirmDialog);
+
+setInterval(() => {
+  if (state.navTab !== 'schedule' || state.weekOffset !== 0) return;
+  if (anyModalOpen()) return;
+  render();
+}, 30000);
 
 // ─── Протяжка по сегментам ──────────────────────────────────────────────────
 // Зажал на сегменте и провёл — отмечаются все, через которые прошёл курсор.

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('adelon', {
   file: {
     save: (defaultName, text) => ipcRenderer.invoke('file:saveText', { defaultName, text }),
     open: () => ipcRenderer.invoke('file:openText'),
+    saveImage: (defaultName, dataUrl) => ipcRenderer.invoke('file:saveImage', { defaultName, dataUrl }),
   },
   ogu: {
     divisions: () => ipcRenderer.invoke('ogu:divisions'),

@@ -178,6 +178,24 @@ ipcMain.handle('file:saveText', async (_e, payload) => {
   }
 });
 
+ipcMain.handle('file:saveImage', async (_e, payload) => {
+  const { defaultName, dataUrl } = payload || {};
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const res = await dialog.showSaveDialog(win, {
+    title: 'Сохранить расписание',
+    defaultPath: defaultName || 'raspisanie.png',
+    filters: [{ name: 'PNG', extensions: ['png'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+  try {
+    const base64 = String(dataUrl || '').replace(/^data:image\/\w+;base64,/, '');
+    fs.writeFileSync(res.filePath, Buffer.from(base64, 'base64'));
+    return { ok: true, name: path.basename(res.filePath) };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
 ipcMain.handle('file:openText', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const res = await dialog.showOpenDialog(win, {
