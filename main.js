@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ogu = require('./ogu');
@@ -42,6 +42,8 @@ function writeData(data) {
 }
 
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -63,11 +65,37 @@ function createWindow() {
   mainWindow = win;
   win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 
+  // Крестик прячет окно в трей вместо закрытия приложения — выход только через меню трея.
+  win.on('close', (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    win.hide();
+  });
+
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   if (process.argv.includes('--dev')) {
     win.webContents.openDevTools({ mode: 'detach' });
   }
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  const img = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png')).resize({ width: 16, height: 16 });
+  tray = new Tray(img);
+  tray.setToolTip('Adelon');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Открыть Adelon', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Выход', click: () => { isQuitting = true; app.quit(); } },
+  ]));
+  tray.on('click', showMainWindow);
 }
 
 function sendUpdate(payload) {
@@ -177,11 +205,15 @@ ipcMain.handle('ogu:schedule', oguHandler((group) => ogu.schedule(group)));
 
 app.whenReady().then(() => {
   createWindow();
+  createTray();
   setupAutoUpdate();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else showMainWindow();
   });
 });
+
+app.on('before-quit', () => { isQuitting = true; });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

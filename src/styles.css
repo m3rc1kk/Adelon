@@ -142,11 +142,26 @@ button.ov-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;
 .subject-card.subj-dragging{opacity:.45;}
 .subject-card.subj-drop-before{box-shadow:-3px 0 0 0 var(--accent);}
 .subject-card.subj-drop-after{box-shadow:3px 0 0 0 var(--accent);}
+.subject-card.subj-search-hit{animation:subj-hit-pulse 1.1s ease-out;}
 
 .text-input{border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:'Golos Text',system-ui,sans-serif;font-size:14px;color:var(--text);background:var(--bg);outline:none;transition:border-color .15s;}
 .text-input:focus{border-color:var(--accent);}
 
 .modal-overlay{position:fixed;inset:0;background:rgba(20,16,12,.4);display:flex;align-items:center;justify-content:center;z-index:100;padding:24px;}
+
+/* Поиск — палитра сверху: одна крупная строка, результаты выпадают под ней. */
+.search-overlay{position:fixed;inset:0;background:rgba(20,16,12,.4);display:flex;align-items:flex-start;justify-content:center;z-index:100;padding:11vh 24px 24px;}
+.search-palette{width:560px;max-width:100%;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 60px -18px rgba(20,16,12,.5);overflow:hidden;}
+.search-field{display:flex;align-items:center;gap:12px;padding:0 16px;height:60px;}
+.search-field-ic{display:flex;color:var(--text-3);flex-shrink:0;}
+.search-field input{flex:1;min-width:0;border:none;background:transparent;outline:none;font-family:'Golos Text',system-ui,sans-serif;font-size:17px;color:var(--text);letter-spacing:-.01em;}
+.search-field input::placeholder{color:var(--text-3);}
+.search-esc{flex-shrink:0;font-family:'Golos Text',system-ui,sans-serif;font-size:11px;color:var(--text-3);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:2px 7px;line-height:1.4;}
+.search-palette.has-results .search-field{border-bottom:1px solid var(--border);}
+.search-results{max-height:min(52vh,420px);overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:2px;}
+.search-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:transparent;border:none;border-radius:10px;padding:9px 12px;cursor:pointer;font-family:'Golos Text',system-ui,sans-serif;transition:background .12s;}
+.search-row:hover,.search-row:focus-visible{background:var(--surface-2);outline:none;}
+.search-row-ic{display:flex;color:var(--text-3);flex-shrink:0;}
 
 .link-btn{display:flex;align-items:center;gap:6px;background:transparent;border:none;padding:0;color:var(--text-2);font-family:'Golos Text',system-ui,sans-serif;font-size:13px;cursor:pointer;transition:color .15s;}
 .link-btn:hover{color:var(--accent);}
@@ -198,6 +213,8 @@ body{transition:background-color .25s ease;}
   .view-enter{animation:view-fade-in .32s cubic-bezier(.2,.7,.3,1) both;}
   .modal-overlay.anim-in{animation:overlay-fade-in .18s ease both;}
   .modal-overlay.anim-in .card{animation:modal-pop-in .24s cubic-bezier(.2,.7,.3,1) both;}
+  .search-overlay.anim-in{animation:overlay-fade-in .18s ease both;}
+  .search-overlay.anim-in .search-palette{animation:search-drop-in .26s cubic-bezier(.2,.7,.3,1) both;}
   .dropdown-in{animation:dropdown-pop-in .16s cubic-bezier(.2,.7,.3,1) both;}
   .seg-pop{animation:seg-pop .32s cubic-bezier(.34,1.4,.4,1) both;}
   /* Полоса заполняется только при входе на «Обзор», а не на каждый перерисов. */
@@ -206,6 +223,8 @@ body{transition:background-color .25s ease;}
 }
 @keyframes view-fade-in{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
 @keyframes hero-grow{from{transform:scaleX(0);}to{transform:none;}}
+@keyframes subj-hit-pulse{0%{box-shadow:0 0 0 3px var(--accent);}100%{box-shadow:0 0 0 0 rgba(0,0,0,0);}}
+@keyframes search-drop-in{from{opacity:0;transform:translateY(-14px);}to{opacity:1;transform:none;}}
 @keyframes overlay-fade-in{from{opacity:0;}to{opacity:1;}}
 @keyframes modal-pop-in{from{opacity:0;transform:translateY(12px) scale(.96);}to{opacity:1;transform:none;}}
 @keyframes dropdown-pop-in{from{opacity:0;transform:translateY(-6px) scale(.97);}to{opacity:1;transform:none;}}

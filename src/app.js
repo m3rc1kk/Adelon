@@ -157,6 +157,8 @@ const state = {
   showImportModal: false,
   csvPreview: null,
   csvBusy: false,
+  showSearchModal: false,
+  searchQuery: '',
   notice: null,
   oguUI: null,
   oguBusy: false,
@@ -289,6 +291,7 @@ function icon(name, size) {
     grid: '<rect x="4" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="4" width="6.2" height="6.2" rx="1.6"/><rect x="4" y="13.8" width="6.2" height="6.2" rx="1.6"/><rect x="13.8" y="13.8" width="6.2" height="6.2" rx="1.6"/>',
     alert: '<path d="M12 4.5l8 14.5H4L12 4.5z"/><path d="M12 10.5v4"/><path d="M12 17.5h.01"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-5-5"/>',
     upload: '<path d="M12 15.5V5"/><path d="M8 9l4-4 4 4"/><path d="M5 19.5h14"/>',
     clock: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.4V12l3 1.8"/>',
     grip: '<circle cx="9" cy="6" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
@@ -422,6 +425,7 @@ let animMainEnter = false;
 let animModalEnter = false;
 let lastToggledSegKey = null;
 let lastExamPanelOpen = false;
+let searchJumpId = null;
 let animExamEnter = false;
 let animExamExit = false;
 
@@ -434,7 +438,7 @@ function render() {
   }
 
   const mainKey = state.navTab + '|' + state.view + '|' + state.currentSessionId + '|' + state.weekOffset;
-  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showExamModal ? 'exam' : state.showGroupsModal ? 'groups' : state.showImportModal ? 'import' : state.csvPreview ? 'csv' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
+  const modalKey = state.showAddModal ? 'add' : state.showSessionModal ? 'session' : state.showExamModal ? 'exam' : state.showGroupsModal ? 'groups' : state.showImportModal ? 'import' : state.showSearchModal ? 'search' : state.csvPreview ? 'csv' : state.confirmDialog ? 'confirm' : (state.update && state.update.status === 'available') ? 'update' : null;
   animMainEnter = mainKey !== lastMainKey;
   animModalEnter = modalKey !== null && modalKey !== lastModalKey;
   animExamEnter = state.examPanelOpen && !lastExamPanelOpen;
@@ -454,6 +458,17 @@ function render() {
     if (el) {
       el.focus();
       if (selStart != null) { try { el.setSelectionRange(selStart, selEnd); } catch (_) {} }
+    }
+  }
+
+  if (searchJumpId) {
+    const id = searchJumpId;
+    searchJumpId = null;
+    const card = root.querySelector(`.subject-card[data-subject-id="${CSS.escape(id)}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('subj-search-hit');
+      setTimeout(() => card.classList.remove('subj-search-hit'), 1200);
     }
   }
 }
@@ -526,6 +541,7 @@ function closeAllModals() {
   state.showLessonModal = false;
   state.csvPreview = null;
   state.confirmDialog = null;
+  state.showSearchModal = false;
   if (state.currentSessionId && !state.sessions.some(s => s.id === state.currentSessionId)) {
     state.view = 'sessions';
     state.currentSessionId = null;
@@ -564,6 +580,7 @@ function template() {
     ${state.showExamModal ? examModalHtml() : ''}
     ${state.showGroupsModal ? groupsModalHtml() : ''}
     ${state.showImportModal ? importModalHtml() : ''}
+    ${state.showSearchModal ? searchModalHtml() : ''}
     ${state.csvPreview ? csvModalHtml() : ''}
     ${state.confirmDialog ? confirmModalHtml() : ''}
     ${state.update && state.update.status === 'available' ? updateModalHtml() : ''}
@@ -962,6 +979,7 @@ function headerHtml(isMain) {
         <button class="tab-btn ${state.navTab === 'schedule' ? 'active' : 'idle'}" data-action="goSchedule">Расписание</button>
       </div>
       <div style="flex:1;"></div>
+      <button class="icon-btn" data-action="openSearchModal" title="Поиск (Ctrl+F)">${icon('search', 17)}</button>
       <div style="position:relative;">
         <button class="icon-btn" data-action="toggleThemeMenu">
           <span style="width:18px;height:18px;border-radius:50%;border:1px solid var(--border-strong);background:${swatchGrad};"></span>
@@ -1956,6 +1974,49 @@ function importModalHtml() {
   </div>`;
 }
 
+function searchModalHtml() {
+  const q = (state.searchQuery || '').trim().toLowerCase();
+  let resultsBlock = '';
+  if (q) {
+    const hits = [];
+    for (const sess of state.sessions) {
+      for (const su of sess.subjects) {
+        const nameHit = su.name.toLowerCase().includes(q);
+        const taskHit = !nameHit && su.tasks.find(t => (t.label || '').toLowerCase().includes(q));
+        if (!nameHit && !taskHit) continue;
+        hits.push({ sess, su, matchLabel: taskHit ? taskHit.label : null });
+      }
+    }
+    const rows = hits.length
+      ? hits.map(h => {
+        const pct = subjectPct(h.su);
+        return `
+        <button class="search-row" data-action="jumpToSearchResult" data-session-id="${esc(h.sess.id)}" data-subject-id="${esc(h.su.id)}" aria-label="Открыть ${esc(h.su.name)}, ${pct}%">
+          <span class="search-row-ic" aria-hidden="true">${icon('search', 14)}</span>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+            <span style="font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(h.su.name)}</span>
+            <span style="font-size:11.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(h.sess.name)}${h.matchLabel ? ` · ${esc(h.matchLabel)}` : ''}</span>
+          </div>
+          <span style="font-size:12.5px;font-weight:700;color:var(--text-2);font-variant-numeric:tabular-nums;flex-shrink:0;">${pct}%</span>
+        </button>`;
+      }).join('')
+      : `<p style="margin:0;font-size:13px;color:var(--text-3);text-align:center;padding:16px 0;">Ничего не найдено</p>`;
+    resultsBlock = `<div class="search-results scroll-y">${rows}</div>`;
+  }
+
+  return `
+  <div class="search-overlay ${animModalEnter ? 'anim-in' : ''}" data-action="closeSearchModal">
+    <div class="search-palette${q ? ' has-results' : ''}" data-stop="1">
+      <div class="search-field">
+        <span class="search-field-ic" aria-hidden="true">${icon('search', 17)}</span>
+        <input type="text" id="search-input" placeholder="Найти предмет или задание…" value="${esc(state.searchQuery || '')}" data-input="searchQuery" autofocus autocomplete="off" spellcheck="false" />
+        <kbd class="search-esc">esc</kbd>
+      </div>
+      ${resultsBlock}
+    </div>
+  </div>`;
+}
+
 function groupsModalHtml() {
   const own = state.userGroups || [];
   const draft = state.groupDraft || '';
@@ -2461,6 +2522,12 @@ const actions = {
     })();
   },
   closeImportModal: () => setUI({ showImportModal: false, oguUI: null }),
+  openSearchModal: () => setUI({ showSearchModal: true, searchQuery: '', showThemeMenu: false }),
+  closeSearchModal: () => setUI({ showSearchModal: false }),
+  jumpToSearchResult: (el) => {
+    searchJumpId = el.dataset.subjectId;
+    setUI({ showSearchModal: false, navTab: 'main', view: 'subjects', currentSessionId: el.dataset.sessionId });
+  },
   importOgu: () => {
     const u = state.oguUI;
     if (!u || !u.groupId || !oguAvailable()) return;
@@ -2733,6 +2800,7 @@ const inputHandlers = {
   sessionName: (v) => { state.sessionDraft.name = v; updateSubmitState('sess-name'); },
   sessionPeriod: (v) => { state.sessionDraft.period = v; },
   groupDraft: (v) => { state.groupDraft = v; render(); },
+  searchQuery: (v) => { state.searchQuery = v; render(); },
   examDraftName: (v) => { state.examDraft.name = v; updateSubmitState('exam-name'); },
   examDraftDate: (v) => { state.examDraft.date = v; },
   oguDivision: (v) => { oguLoadCourses(Number(v), 2); },
@@ -2758,7 +2826,8 @@ root.addEventListener('click', (e) => {
   if (segSuppressClick) { segSuppressClick = false; return; }
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
-  if (actionEl.classList.contains('modal-overlay') && e.target !== actionEl) return;
+  // Клик по подложке закрывает, но клик внутри карточки/палитры — нет.
+  if ((actionEl.classList.contains('modal-overlay') || actionEl.classList.contains('search-overlay')) && e.target !== actionEl) return;
   const a = actionEl.dataset.action;
   if (actions[a]) {
     e.preventDefault();
@@ -2809,6 +2878,13 @@ document.addEventListener('keydown', (e) => {
     if (redo) redoLast(); else undoLast();
     return;
   }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F' || e.key === 'а' || e.key === 'А')) {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    e.preventDefault();
+    actions.openSearchModal();
+    return;
+  }
   if (e.key === 'Escape') {
     if (state.examReminders && state.examReminders.length) actions.dismissReminders();
     else if (state.undo) actions.dismissUndo();
@@ -2818,6 +2894,7 @@ document.addEventListener('keydown', (e) => {
     else if (state.showExamModal) actions.closeExamModal();
     else if (state.showGroupsModal) actions.closeGroupsModal();
     else if (state.showImportModal) actions.closeImportModal();
+    else if (state.showSearchModal) actions.closeSearchModal();
     else if (state.csvPreview) actions.closeCsvModal();
     else if (state.update && state.update.status === 'available') actions.dismissUpdate();
     else if (state.showThemeMenu) actions.closeThemeMenu();
