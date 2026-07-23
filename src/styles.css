@@ -241,6 +241,18 @@ body{transition:background-color .25s ease;}
 @keyframes seg-pop{0%{transform:scaleY(1);}45%{transform:scaleY(1.9);}100%{transform:scaleY(1);}}
 @keyframes toast-slide-in{from{opacity:0;transform:translateY(16px) scale(.98);}to{opacity:1;transform:none;}}
 
+/* Листалка по версиям в окне обновления. */
+.rel-nav{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+.rel-nav-label{font-size:11.5px;color:var(--text-3);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:44px;text-align:center;}
+.rel-arrow{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-2);cursor:pointer;transition:background .15s,color .15s,opacity .15s;}
+.rel-arrow:hover:not(:disabled){background:var(--surface-2);color:var(--text);}
+.rel-arrow:disabled{opacity:.35;cursor:default;}
+.rel-ver{display:inline-block;font-family:'Golos Text',system-ui,sans-serif;font-size:11.5px;font-weight:600;color:var(--accent-2);background:var(--accent-soft);border-radius:99px;padding:3px 10px;margin-bottom:10px;}
+.rel-dots{display:flex;justify-content:center;gap:6px;padding-top:2px;}
+.rel-dot{width:7px;height:7px;padding:0;border:none;border-radius:50%;background:var(--border-strong);cursor:pointer;transition:background .15s,transform .15s;}
+.rel-dot:hover{background:var(--text-3);}
+.rel-dot.active{background:var(--accent);transform:scale(1.15);}
+
 .release-notes{font-size:13px;line-height:1.5;color:var(--text-2);}
 .release-notes>*{margin:0 0 8px;}
 .release-notes>*:last-child{margin-bottom:0;}
@@ -254,6 +266,12 @@ body{transition:background-color .25s ease;}
 .release-notes blockquote{margin:0;padding-left:12px;border-left:2px solid var(--border-strong);color:var(--text-3);}
 .release-notes hr{border:none;border-top:1px solid var(--border);}
 
+/* Кнопка вопросов к экзамену: с прикреплённым файлом она заметнее. */
+.mini-icon-btn.exam-q.has-file{background:var(--accent-soft);color:var(--accent-2);}
+.exam-file-chip{align-self:flex-start;display:flex;align-items:center;gap:5px;margin-top:3px;max-width:100%;padding:2px 8px 2px 6px;border:1px solid var(--border);border-radius:99px;background:var(--surface-2);color:var(--text-3);font-family:'Golos Text',system-ui,sans-serif;font-size:11px;cursor:pointer;transition:color .15s,border-color .15s;}
+.exam-file-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.exam-file-chip:hover{color:var(--accent-2);border-color:var(--accent);}
+
 .exam-toggle{transition:background .15s;font-family:inherit;}
 .exam-toggle:hover{background:var(--surface-2) !important;}
 .exam-chevron:hover{background:var(--surface-2) !important;color:var(--text-2) !important;}
@@ -265,6 +283,17 @@ body{transition:background-color .25s ease;}
 @keyframes exam-panel-in{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
 @keyframes chevron-rotate-open{from{transform:rotate(0deg);}to{transform:rotate(180deg);}}
 @keyframes chevron-rotate-close{from{transform:rotate(180deg);}to{transform:rotate(0deg);}}
+
+/* Подсказка при перетаскивании CSV в окно. */
+.drop-overlay{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(20,16,12,.5);pointer-events:none;}
+.drop-overlay.visible{display:flex;}
+.drop-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:38px 52px;border-radius:18px;border:2px dashed var(--accent);background:var(--surface);box-shadow:0 24px 60px -18px rgba(20,16,12,.5);}
+.drop-ic{display:flex;color:var(--accent);}
+.drop-title{font-family:'Onest',system-ui,sans-serif;font-weight:600;font-size:18px;letter-spacing:-.01em;color:var(--text);}
+.drop-sub{font-size:13px;color:var(--text-3);}
+@media (prefers-reduced-motion: no-preference){
+  .drop-overlay.visible .drop-card{animation:modal-pop-in .2s cubic-bezier(.2,.7,.3,1) both;}
+}
 
 .confetti-layer{position:fixed;inset:0;z-index:9998;pointer-events:none;overflow:hidden;}
 .confetti-piece{position:fixed;top:0;left:0;will-change:transform,opacity;opacity:0;}

@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('adelon', {
     open: () => ipcRenderer.invoke('file:openText'),
     saveImage: (defaultName, dataUrl) => ipcRenderer.invoke('file:saveImage', { defaultName, dataUrl }),
   },
+  exam: {
+    attach: (examId) => ipcRenderer.invoke('exam:attach', { examId }),
+    open: (stored) => ipcRenderer.invoke('exam:open', { stored }),
+    detach: (stored) => ipcRenderer.invoke('exam:detach', { stored }),
+  },
   ogu: {
     divisions: () => ipcRenderer.invoke('ogu:divisions'),
     courses: (div) => ipcRenderer.invoke('ogu:courses', div),

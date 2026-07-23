@@ -137,6 +137,7 @@ const state = {
   userGroups: [],
   userExams: {},
   hiddenExams: [],
+  examFiles: {},
   activity: {},
   remindersSeen: {},
   examReminders: null,
@@ -170,9 +171,10 @@ const state = {
   oguGroup: null,
   oguSync: null,
   update: null,
+  updateSlide: 0,
 };
 
-const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userGroups', 'userExams', 'hiddenExams', 'activity', 'remindersSeen', 'subjectSort', 'hideClosed'];
+const PERSIST_KEYS = ['themeId', 'sessions', 'schedule', 'oguGroup', 'oguSync', 'examGroup', 'userGroups', 'userExams', 'hiddenExams', 'examFiles', 'activity', 'remindersSeen', 'subjectSort', 'hideClosed'];
 
 function collectPersist() {
   const out = {};
@@ -203,6 +205,7 @@ async function loadPersisted() {
       if (typeof data.examGroup === 'string' && examGroups().some(g => g.id === data.examGroup)) state.examGroup = data.examGroup;
       if (data.userExams && typeof data.userExams === 'object' && !Array.isArray(data.userExams)) state.userExams = data.userExams;
       if (Array.isArray(data.hiddenExams)) state.hiddenExams = data.hiddenExams;
+      if (data.examFiles && typeof data.examFiles === 'object' && !Array.isArray(data.examFiles)) state.examFiles = data.examFiles;
       if (SUBJECT_SORTS.some(s => s.id === data.subjectSort)) state.subjectSort = data.subjectSort;
       if (typeof data.hideClosed === 'boolean') state.hideClosed = data.hideClosed;
       if (data.activity && typeof data.activity === 'object' && !Array.isArray(data.activity)) state.activity = data.activity;
@@ -656,9 +659,62 @@ function formatNotes(raw) {
   return `<div class="release-notes">${sanitizeReleaseHtml(text)}</div>`;
 }
 
+// Заметки приходят списком «версия + описание», но старые сборки слали строку —
+// приводим оба вида к одному массиву, новые версии первыми.
+function normalizeNotes(u) {
+  const raw = u && u.notes;
+  let list;
+  if (Array.isArray(raw)) {
+    list = raw
+      .map(n => ({ version: (n && n.version) || '', note: String((n && n.note) || '') }))
+      .filter(n => n.note.trim());
+  } else {
+    const text = String(raw || '').trim();
+    list = text ? [{ version: (u && u.version) || '', note: text }] : [];
+  }
+  return list.sort((a, b) => cmpVersion(b.version, a.version));
+}
+
+function cmpVersion(a, b) {
+  const pa = String(a || '').replace(/^v/, '').split('.').map(Number);
+  const pb = String(b || '').replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
 function updateModalHtml() {
   const u = state.update;
   const ver = u.version ? esc(u.version) : '';
+  const notes = normalizeNotes(u);
+  const many = notes.length > 1;
+  const idx = Math.max(0, Math.min(notes.length - 1, state.updateSlide || 0));
+  const cur = notes[idx];
+
+  // Несколько версий листаются стрелками: человек, пропустивший пару релизов,
+  // иначе увидел бы только последний и не узнал, что появилось до него.
+  const nav = many ? `
+    <div class="rel-nav">
+      <button class="rel-arrow" data-action="prevUpdateNote" ${idx === 0 ? 'disabled' : ''} title="Более новая версия">${icon('chevron-left', 14)}</button>
+      <span class="rel-nav-label">${idx + 1} из ${notes.length}</span>
+      <button class="rel-arrow" data-action="nextUpdateNote" ${idx === notes.length - 1 ? 'disabled' : ''} title="Более ранняя версия">${icon('chevron-right', 14)}</button>
+    </div>` : '';
+
+  const dots = many ? `
+    <div class="rel-dots">
+      ${notes.map((n, i) => `<button class="rel-dot${i === idx ? ' active' : ''}" data-action="gotoUpdateNote" data-index="${i}" title="Версия ${esc(n.version || '')}" aria-label="Версия ${esc(n.version || '')}"></button>`).join('')}
+    </div>` : '';
+
+  const body = cur ? `
+    ${cur.version ? `<div class="rel-ver">v${esc(cur.version)}${many && idx === 0 ? ' · последняя' : ''}</div>` : ''}
+    ${formatNotes(cur.note)}` : formatNotes('');
+
+  const subtitle = many
+    ? `Вы пропустили ${notes.length} ${plural(notes.length, ['версию', 'версии', 'версий'])} — вот что изменилось`
+    : (ver ? 'Версия ' + ver + ' готова к установке' : 'Новая версия готова к установке');
+
   return `
   <div class="modal-overlay ${animModalEnter ? 'anim-in' : ''}">
     <div class="card scroll-y" style="border-radius:18px;padding:26px;width:480px;max-width:100%;max-height:86vh;display:flex;flex-direction:column;gap:20px;" data-stop="1">
@@ -666,15 +722,19 @@ function updateModalHtml() {
         <span style="width:46px;height:46px;border-radius:13px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-2);">${icon('download', 23)}</span>
         <div style="display:flex;flex-direction:column;gap:3px;min-width:0;flex:1;">
           <h2 style="margin:0;font-family:'Onest';font-weight:600;font-size:19px;color:var(--text);letter-spacing:-.01em;">Доступно обновление</h2>
-          <span style="font-size:12.5px;color:var(--text-2);">${ver ? 'Версия ' + ver + ' готова к установке' : 'Новая версия готова к установке'}</span>
+          <span style="font-size:12.5px;color:var(--text-2);">${subtitle}</span>
         </div>
         ${ver ? `<span style="align-self:flex-start;font-family:'Golos Text';font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:99px;background:var(--surface-2);color:var(--text-2);white-space:nowrap;flex-shrink:0;">v${ver}</span>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <span style="font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);">Что нового</span>
-        <div class="scroll-y" style="max-height:38vh;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--bg);">
-          ${formatNotes(u.notes)}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+          <span style="font-size:12px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);">Что нового</span>
+          ${nav}
         </div>
+        <div class="scroll-y" style="max-height:38vh;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--bg);">
+          ${body}
+        </div>
+        ${dots}
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:2px;">
         <button class="primary-btn" data-action="downloadUpdate" style="display:flex;align-items:center;gap:7px;">${icon('download', 16)}Скачать</button>
@@ -1498,16 +1558,22 @@ function examPanelHtml() {
       ? `<span style="font-family:'Golos Text';font-variant-numeric:tabular-nums;font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;">${fmtExamDate(e.date)}</span>
          <span style="font-size:11.5px;color:${soon ? 'var(--accent-2)' : 'var(--text-3)'};white-space:nowrap;">${daysUntilText(e.date)}</span>`
       : `<span style="font-size:12px;color:var(--text-3);white-space:nowrap;font-style:italic;">Дата уточняется</span>`;
+    const qf = (state.examFiles || {})[e.id];
+    const qBtn = qf
+      ? `<button class="mini-icon-btn exam-q has-file" data-action="openExamFile" data-exam-id="${esc(e.id)}" title="Открыть вопросы: ${esc(qf.name)}" style="width:28px;height:28px;flex-shrink:0;">${icon('book', 14)}</button>`
+      : `<button class="mini-icon-btn exam-q" data-action="attachExamFile" data-exam-id="${esc(e.id)}" title="Прикрепить файл с вопросами" style="width:28px;height:28px;flex-shrink:0;">${icon('book', 14)}</button>`;
     return `
     <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;${idx ? 'border-top:1px solid var(--border);' : ''}">
       <span style="width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:${accentBg};color:${accentCol};">${icon(isExam ? 'cap' : 'clipboard', 17)}</span>
       <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;">
         <span style="font-size:14px;font-weight:500;color:var(--text);overflow-wrap:anywhere;">${esc(e.name)}</span>
         <span style="font-size:12px;color:var(--text-3);">${examKindLabel(e.kind)}${e._user ? ' · добавлено вами' : ''}</span>
+        ${qf ? `<button class="exam-file-chip" data-action="detachExamFile" data-exam-id="${esc(e.id)}" title="Открепить файл">${icon('x', 11)}<span>${esc(qf.name)}</span></button>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;">
         ${dateBlock}
       </div>
+      ${qBtn}
       <button class="mini-icon-btn exam-del" data-action="deleteExam" data-exam-id="${esc(e.id)}" title="Удалить из моего списка" style="width:28px;height:28px;flex-shrink:0;">${icon('trash', 13)}</button>
     </div>`;
   }).join('');
@@ -2981,6 +3047,9 @@ const actions = {
   },
   installUpdate: () => { if (window.adelon && window.adelon.update) window.adelon.update.install(); },
   dismissUpdate: () => setUI({ update: null }),
+  prevUpdateNote: () => setUI({ updateSlide: Math.max(0, (state.updateSlide || 0) - 1) }),
+  nextUpdateNote: () => setUI({ updateSlide: Math.min(normalizeNotes(state.update).length - 1, (state.updateSlide || 0) + 1) }),
+  gotoUpdateNote: (el) => setUI({ updateSlide: Number(el.dataset.index) || 0 }),
 
   openSessionModal: () => setUI({ showSessionModal: true, editSessionId: null, sessionDraft: { name: '', period: '' } }),
   openEditSessionModal: (el) => {
@@ -3026,6 +3095,40 @@ const actions = {
     state.userExams[g] = [...state.userExams[g], item];
     setState({ showExamModal: false });
   },
+  attachExamFile: async (el) => {
+    const api = window.adelon && window.adelon.exam;
+    if (!api) { showNotice('Прикрепить файл можно только в приложении.', 'warn'); return; }
+    const id = el.dataset.examId;
+    const res = await api.attach(id);
+    if (!res || !res.ok) {
+      if (res && res.error) showNotice('Не удалось прикрепить файл: ' + res.error, 'warn');
+      return;
+    }
+    state.examFiles = { ...(state.examFiles || {}), [id]: { name: res.name, stored: res.stored } };
+    setState({});
+    showNotice(`Вопросы прикреплены: ${res.name}`);
+  },
+  openExamFile: async (el) => {
+    const api = window.adelon && window.adelon.exam;
+    const f = (state.examFiles || {})[el.dataset.examId];
+    if (!api || !f) return;
+    const res = await api.open(f.stored);
+    if (res && res.missing) showNotice('Файл не найден — возможно, он был удалён. Прикрепите заново.', 'warn');
+    else if (res && !res.ok) showNotice('Не удалось открыть файл: ' + (res.error || ''), 'warn');
+  },
+  detachExamFile: (el) => {
+    const id = el.dataset.examId;
+    const f = (state.examFiles || {})[id];
+    if (!f) return;
+    askConfirm({ title: 'Открепить файл?', message: `«${f.name}» больше не будет открываться по кнопке.`, confirmLabel: 'Открепить' }, () => {
+      const api = window.adelon && window.adelon.exam;
+      if (api) api.detach(f.stored);
+      const next = { ...(state.examFiles || {}) };
+      delete next[id];
+      setState({ examFiles: next });
+    });
+  },
+
   openGroupsModal: () => setUI({ showGroupsModal: true, groupDraft: '' }),
   closeGroupsModal: () => setUI({ showGroupsModal: false, groupDraft: '' }),
   submitGroup: () => {
@@ -3364,6 +3467,74 @@ root.addEventListener('dragend', () => {
   for (const el of document.querySelectorAll('.subj-dragging')) el.classList.remove('subj-dragging');
 });
 
+// ─── Импорт CSV перетаскиванием ─────────────────────────────────────────────
+// Оверлей показываем напрямую через класс, а не через render(): полная
+// перерисовка посреди жеста снесла бы элемент, на котором висит drop.
+// Перетаскивание предметов сюда не попадает — там в dataTransfer не файлы.
+const dropOverlay = document.createElement('div');
+dropOverlay.className = 'drop-overlay';
+dropOverlay.innerHTML = `
+  <div class="drop-card">
+    <span class="drop-ic">${icon('sheet', 30)}</span>
+    <span class="drop-title">Отпустите файл</span>
+    <span class="drop-sub">Импорт предметов и экзаменов из CSV</span>
+  </div>`;
+document.body.appendChild(dropOverlay);
+
+const dragHasFiles = (e) => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'));
+let dragDepth = 0;
+
+function setDropVisible(on) {
+  dropOverlay.classList.toggle('visible', on);
+}
+
+// Декодируем так же, как main.js: Excel в русской локали пишет windows-1251.
+async function readDroppedText(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  if (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return new TextDecoder('utf-8').decode(buf.slice(3));
+  const utf8 = new TextDecoder('utf-8').decode(buf);
+  if (!utf8.includes('�')) return utf8;
+  try { return new TextDecoder('windows-1251').decode(buf); } catch (_) { return utf8; }
+}
+
+window.addEventListener('dragenter', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth++;
+  setDropVisible(true);
+});
+
+window.addEventListener('dragover', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+});
+
+window.addEventListener('dragleave', (e) => {
+  if (!dragHasFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) setDropVisible(false);
+});
+
+window.addEventListener('drop', async (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  setDropVisible(false);
+  const file = (e.dataTransfer.files || [])[0];
+  if (!file) return;
+  if (!/\.csv$/i.test(file.name)) {
+    showNotice('Нужен файл CSV — этот формат не подходит.', 'warn');
+    return;
+  }
+  try {
+    const text = await readDroppedText(file);
+    setUI({ csvPreview: analyzeCsv(text, file.name) });
+  } catch (err) {
+    showNotice('Не удалось прочитать файл: ' + String(err && err.message || err), 'warn');
+  }
+});
+
 function hideSplash() {
   const el = document.getElementById('splash');
   if (!el) return;
@@ -3400,6 +3571,7 @@ function hideSplash() {
         return;
       }
       state.update = payload;
+      state.updateSlide = 0;
       render();
     });
   }

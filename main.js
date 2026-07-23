@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ogu = require('./ogu');
@@ -104,12 +104,22 @@ function sendUpdate(payload) {
   }
 }
 
+// Возвращаем заметки списком «версия + описание». При fullChangelog GitHub
+// отдаёт все релизы между установленной и новой, поэтому человек, пропустивший
+// несколько версий, видит их все, а не только последнюю.
 function extractNotes(info) {
   const rn = info && info.releaseNotes;
-  if (!rn) return '';
-  if (typeof rn === 'string') return rn;
-  if (Array.isArray(rn)) return rn.map((n) => (n && n.note) || '').filter(Boolean).join('\n\n');
-  return String(rn);
+  const fallbackVersion = (info && info.version) || '';
+  if (!rn) return [];
+  if (typeof rn === 'string') {
+    return rn.trim() ? [{ version: fallbackVersion, note: rn }] : [];
+  }
+  if (Array.isArray(rn)) {
+    return rn
+      .map((n) => ({ version: (n && n.version) || fallbackVersion, note: (n && n.note) || '' }))
+      .filter((n) => String(n.note).trim());
+  }
+  return [{ version: fallbackVersion, note: String(rn) }];
 }
 
 function setupAutoUpdate() {
@@ -117,6 +127,8 @@ function setupAutoUpdate() {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  // Нужны заметки всех пропущенных релизов, а не только самого свежего.
+  autoUpdater.fullChangelog = true;
 
   autoUpdater.on('update-available', (info) => {
     sendUpdate({ status: 'available', version: info.version, notes: extractNotes(info) });
@@ -176,6 +188,56 @@ ipcMain.handle('file:saveText', async (_e, payload) => {
   } catch (err) {
     return { ok: false, error: String((err && err.message) || err) };
   }
+});
+
+// ─── Файлы с вопросами к экзаменам ──────────────────────────────────────────
+// Копируем выбранный файл к себе в userData: если бы мы хранили путь к
+// оригиналу, кнопка переставала бы работать после того, как файл перенесли
+// или удалили из «Загрузок».
+const EXAM_DIR = path.join(app.getPath('userData'), 'exam-files');
+
+function safeName(name) {
+  return String(name || 'file').replace(/[\\/:*?"<>|]/g, '_').slice(-120);
+}
+
+ipcMain.handle('exam:attach', async (_e, payload) => {
+  const { examId } = payload || {};
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Файл с вопросами',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Документы', extensions: ['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt', 'md', 'xlsx', 'png', 'jpg', 'jpeg'] },
+      { name: 'Все файлы', extensions: ['*'] },
+    ],
+  });
+  if (res.canceled || !res.filePaths.length) return { ok: false, canceled: true };
+  try {
+    fs.mkdirSync(EXAM_DIR, { recursive: true });
+    const src = res.filePaths[0];
+    const base = safeName(path.basename(src));
+    const stored = `${safeName(examId)}-${Date.now()}-${base}`;
+    fs.copyFileSync(src, path.join(EXAM_DIR, stored));
+    return { ok: true, name: base, stored };
+  } catch (err) {
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+});
+
+ipcMain.handle('exam:open', async (_e, payload) => {
+  const { stored } = payload || {};
+  if (!stored) return { ok: false, error: 'Файл не указан' };
+  const full = path.join(EXAM_DIR, path.basename(String(stored)));
+  if (!fs.existsSync(full)) return { ok: false, missing: true };
+  const err = await shell.openPath(full);
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+ipcMain.handle('exam:detach', (_e, payload) => {
+  const { stored } = payload || {};
+  if (!stored) return { ok: true };
+  try { fs.unlinkSync(path.join(EXAM_DIR, path.basename(String(stored)))); } catch (_) {}
+  return { ok: true };
 });
 
 ipcMain.handle('file:saveImage', async (_e, payload) => {
