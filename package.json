@@ -10,6 +10,7 @@
     "dev": "electron . --dev",
     "build:icon": "node scripts/gen-icon.js",
     "dist": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
     "release": "electron-builder --win --publish always"
   },
   "devDependencies": {
@@ -40,6 +41,19 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "artifactName": "${productName}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.education",
+      "identity": null,
+      "artifactName": "${productName}-${arch}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "${productName}-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",
