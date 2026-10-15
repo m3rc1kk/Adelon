@@ -159,6 +159,42 @@ button.ov-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;
 
 .modal-overlay{position:fixed;inset:0;background:rgba(20,16,12,.4);display:flex;align-items:center;justify-content:center;z-index:100;padding:24px;}
 
+/* Вкладка «Нагрузка». */
+.load-top{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:stretch;margin-bottom:20px;}
+.load-focus{display:flex;flex-direction:column;gap:6px;padding:4px 0;}
+.load-now-tag{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--accent);margin-bottom:2px;}
+.load-focus-when{font-size:12.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--accent-2);}
+.load-focus-subj{font-family:'Onest',system-ui,sans-serif;font-weight:600;font-size:21px;letter-spacing:-.02em;color:var(--text);line-height:1.2;}
+.load-focus-meta{font-size:13px;color:var(--text-2);}
+.load-focus-teacher{font-size:12.5px;color:var(--text-3);}
+.load-types{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:28px;}
+.load-type{padding:20px;display:flex;flex-direction:column;gap:10px;}
+.load-type-head{display:flex;align-items:center;gap:9px;font-family:'Onest',system-ui,sans-serif;font-weight:600;font-size:14.5px;color:var(--text);}
+.load-type-ic{display:flex;color:var(--accent-2);}
+.load-type-nums{display:flex;align-items:baseline;gap:7px;}
+.load-type-nums b{font-family:'Golos Text',system-ui,sans-serif;font-weight:700;font-size:30px;line-height:1;color:var(--text);font-variant-numeric:tabular-nums;}
+.load-type-nums span{font-size:13px;color:var(--text-3);}
+.load-type-bar{height:7px;border-radius:99px;background:var(--seg-empty);overflow:hidden;}
+.load-type-bar div{height:100%;border-radius:99px;background:var(--accent);}
+.load-type-foot{font-size:12px;color:var(--text-3);}
+.load-h2{font-family:'Onest',system-ui,sans-serif;font-weight:600;font-size:17px;letter-spacing:-.01em;color:var(--text);margin:0 0 14px;}
+.load-table{width:100%;border-collapse:collapse;font-family:'Golos Text',system-ui,sans-serif;}
+.load-table th{font-size:11.5px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--text-3);padding:13px 14px;text-align:center;border-bottom:1px solid var(--border);white-space:nowrap;}
+.load-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13.5px;color:var(--text);}
+.load-table tbody tr:last-child td{border-bottom:none;}
+.load-table tbody tr:hover{background:var(--surface-2);}
+.load-td-subj{font-weight:500;overflow-wrap:anywhere;}
+.load-td-num{text-align:center;font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;}
+.load-td-num span{color:var(--text-3);font-weight:400;}
+.load-td-done{color:var(--good);}
+.load-td-done span{color:var(--good);opacity:.6;}
+.load-td-dim{color:var(--text-3);}
+.load-td-next{font-size:12.5px;color:var(--text-2);white-space:nowrap;}
+@media (max-width:860px){
+  .load-top{grid-template-columns:1fr;}
+  .load-types{grid-template-columns:1fr;}
+}
+
 /* Поиск — палитра сверху: одна крупная строка, результаты выпадают под ней. */
 .search-overlay{position:fixed;inset:0;background:rgba(20,16,12,.4);display:flex;align-items:flex-start;justify-content:center;z-index:100;padding:11vh 24px 24px;}
 .search-palette{width:560px;max-width:100%;background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 60px -18px rgba(20,16,12,.5);overflow:hidden;}
