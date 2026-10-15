@@ -50,33 +50,9 @@ function examGroups() {
 }
 const isUserGroup = (id) => (state.userGroups || []).some(g => g.id === id);
 
-const EXAM_SCHEDULES = {
-  '41pg': [
-    { id: '41pg-hist', name: 'История России', kind: 'zachet', date: '2027-01-09' },
-    { id: '41pg-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-13' },
-    { id: '41pg-matan', name: 'Математический анализ', kind: 'exam', date: '2027-01-16' },
-    { id: '41pg-prog', name: 'Программирование', kind: 'exam', date: '2027-01-21' },
-    { id: '41pg-db', name: 'Базы данных', kind: 'exam', date: null },
-  ],
-  '41pi': [
-    { id: '41pi-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-10' },
-    { id: '41pi-phys', name: 'Физика', kind: 'exam', date: '2027-01-15' },
-    { id: '41pi-prog', name: 'Программирование', kind: 'exam', date: '2027-01-19' },
-    { id: '41pi-oop', name: 'ООП', kind: 'exam', date: '2027-01-24' },
-  ],
-  '41it': [
-    { id: '41it-phil', name: 'Философия', kind: 'zachet', date: '2027-01-11' },
-    { id: '41it-net', name: 'Компьютерные сети', kind: 'exam', date: '2027-01-17' },
-    { id: '41it-db', name: 'Базы данных', kind: 'exam', date: '2027-01-22' },
-    { id: '41it-web', name: 'Веб-технологии', kind: 'zachet', date: null },
-  ],
-  '41ivt': [
-    { id: '41ivt-eng', name: 'Иностранный язык', kind: 'zachet', date: '2027-01-12' },
-    { id: '41ivt-arch', name: 'Архитектура ЭВМ', kind: 'exam', date: '2027-01-18' },
-    { id: '41ivt-os', name: 'Операционные системы', kind: 'exam', date: '2027-01-23' },
-    { id: '41ivt-math', name: 'Дискретная математика', kind: 'exam', date: '2027-01-27' },
-  ],
-};
+// Готовых списков экзаменов больше нет — каждый заводит свои сам или получает
+// через импорт CSV. Объект оставлен, чтобы не трогать обращения к нему.
+const EXAM_SCHEDULES = {};
 
 const THEME_OPTIONS = [
   { id: 'warm-light', label: 'Тёплая светлая', bg: '#F4F1EB', accent: '#4E8158' },
@@ -605,6 +581,7 @@ function template() {
     ${isMain && state.view === 'sessions' ? sessionsViewHtml() : ''}
     ${isMain && state.view === 'subjects' ? subjectsViewHtml() : ''}
     ${state.navTab === 'schedule' ? scheduleViewHtml() : ''}
+    ${state.navTab === 'load' ? loadViewHtml() : ''}
     ${state.showAddModal ? addModalHtml() : ''}
     ${state.showSessionModal ? sessionModalHtml() : ''}
     ${state.showExamModal ? examModalHtml() : ''}
@@ -1089,6 +1066,7 @@ function headerHtml(isMain) {
         <button class="tab-btn ${state.navTab === 'dashboard' ? 'active' : 'idle'}" data-action="goDashboard">Обзор</button>
         <button class="tab-btn ${isMain ? 'active' : 'idle'}" data-action="goSessionsTab">Сессии</button>
         <button class="tab-btn ${state.navTab === 'schedule' ? 'active' : 'idle'}" data-action="goSchedule">Расписание</button>
+        <button class="tab-btn ${state.navTab === 'load' ? 'active' : 'idle'}" data-action="goLoad">Нагрузка</button>
       </div>
       <div style="flex:1;"></div>
       <button class="icon-btn" data-action="openSearchModal" title="Поиск (Ctrl+F)">${icon('search', 17)}</button>
@@ -1878,6 +1856,182 @@ function scheduleViewHtml() {
       </div>
     </div>
   </div>`;
+}
+
+// ─── Вкладка «Нагрузка» (41ПГ, 2 подгруппа, 5 семестр) ──────────────────────
+// Данные зашиты в schedule-sem5.js — это одна конкретная группа, без выбора.
+// Занятия, стоящие в один день по одному предмету, считаем за одно: две лабы
+// подряд — это одна лаба, как их и воспринимают студенты.
+const LOAD_TYPES = [
+  { key: 'лаб', label: 'Лабораторные', short: 'Лабы', icon: 'flask' },
+  { key: 'пр', label: 'Практические', short: 'Практики', icon: 'pen' },
+  { key: 'лек', label: 'Лекции', short: 'Лекции', icon: 'book' },
+];
+
+let _sem5cache = null;
+function sem5Data() {
+  if (_sem5cache) return _sem5cache;
+  const D = window.SEM5_41PG;
+  if (!D || !Array.isArray(D.lessons)) return null;
+  const toMin = (hhmm) => { const m = /(\d{1,2}):(\d{2})/.exec(hhmm || ''); return m ? (+m[1]) * 60 + (+m[2]) : 0; };
+  const map = new Map();
+  for (const row of D.lessons) {
+    const [date, pair, type, subj, teacher, room] = row;
+    const k = date + '|' + subj + '|' + type;
+    let s = map.get(k);
+    if (!s) { s = { date, subj, type, teacher, room, pairs: [] }; map.set(k, s); }
+    s.pairs.push(pair);
+  }
+  const sessions = [...map.values()].map(s => {
+    const minPair = Math.min(...s.pairs), maxPair = Math.max(...s.pairs);
+    const [y, mo, d] = s.date.split('-').map(Number);
+    const st = toMin(D.pairTimes[minPair]), en = toMin(D.pairEnds[maxPair]);
+    return {
+      ...s, minPair, maxPair,
+      startDt: new Date(y, mo - 1, d, Math.floor(st / 60), st % 60),
+      endDt: new Date(y, mo - 1, d, Math.floor(en / 60), en % 60),
+    };
+  }).sort((a, b) => a.startDt - b.startDt);
+  _sem5cache = { meta: D, sessions };
+  return _sem5cache;
+}
+
+function loadViewHtml() {
+  const data = sem5Data();
+  const wrap = (inner) => `<div class="${animMainEnter ? 'view-enter' : ''}"><div style="max-width:1240px;margin:0 auto;width:100%;padding:34px 32px 56px;">${inner}</div></div>`;
+  if (!data || !data.sessions.length) {
+    return wrap(`<h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0 0 10px;">Нагрузка</h1>
+      <p style="font-size:14px;color:var(--text-2);">Расписание не загружено.</p>`);
+  }
+  const { meta, sessions } = data;
+  const now = new Date();
+  const isPassed = (s) => s.endDt < now;
+  const isNow = (s) => s.startDt <= now && now < s.endDt;
+
+  // Итоги по типам
+  const byType = {};
+  for (const t of LOAD_TYPES) byType[t.key] = { total: 0, passed: 0, next: null };
+  for (const s of sessions) {
+    const b = byType[s.type]; if (!b) continue;
+    b.total++;
+    if (isPassed(s)) b.passed++;
+    else if (!b.next && !isNow(s)) b.next = s;
+  }
+  const totalAll = sessions.length;
+  const passedAll = sessions.filter(isPassed).length;
+  const leftAll = totalAll - passedAll;
+  const pct = Math.round((passedAll / totalAll) * 100);
+
+  // Ближайшее занятие и то, что идёт сейчас
+  const ongoing = sessions.find(isNow);
+  const upcoming = sessions.filter(s => s.startDt > now);
+  const next = upcoming[0] || null;
+
+  const fmtDate = (dt) => `${dt.getDate()} ${RU_MONTHS[dt.getMonth()]}`;
+  const fmtTime = (s) => `${meta.pairTimes[s.minPair]}–${meta.pairEnds[s.maxPair]}`;
+  const dayDiff = (dt) => { const a = new Date(now.getFullYear(), now.getMonth(), now.getDate()); const b = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()); return Math.round((b - a) / 86400000); };
+  const whenText = (s) => { const d = dayDiff(s.startDt); if (d === 0) return 'сегодня'; if (d === 1) return 'завтра'; if (d < 0) return ''; return `через ${d} ${plural(d, ['день', 'дня', 'дней'])}`; };
+  const kindShort = (t) => (LOAD_TYPES.find(x => x.key === t) || {}).short || t;
+
+  // ── Герой: прогресс по семестру ──
+  const hero = `
+    <div class="card ov-card">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('target', 16)}</span><span class="ov-card-title">Пройдено по семестру</span></div>
+      <div class="hero-main">
+        <div class="hero-big">${pct}<i>%</i></div>
+        <div class="hero-bar"><div class="hero-bar-fill" style="width:${pct}%;"></div></div>
+        <div class="hero-caption">Позади ${passedAll} из ${totalAll} ${plural(totalAll, ['занятия', 'занятий', 'занятий'])} · впереди ещё ${leftAll}</div>
+      </div>
+      <div class="hero-grid">
+        ${LOAD_TYPES.map(t => {
+          const b = byType[t.key];
+          return `<div class="hero-cell"><b>${b.total - b.passed}</b><span>${t.short.toLowerCase()} осталось</span></div>`;
+        }).join('')}
+        <div class="hero-cell"><b>${upcoming.length ? (dayDiff(upcoming[upcoming.length - 1].startDt)) : 0}</b><span>дней до конца</span></div>
+      </div>
+    </div>`;
+
+  // ── Карточка «сейчас / ближайшее» ──
+  const focusInner = ongoing
+    ? `<div class="load-now-tag"><span class="lesson-now-dot"></span>Идёт сейчас</div>
+       <div class="load-focus-subj">${esc(ongoing.subj)}</div>
+       <div class="load-focus-meta">${kindShort(ongoing.type)} · ${fmtTime(ongoing)}${ongoing.room ? ' · ауд. ' + esc(ongoing.room) : ''}</div>
+       <div class="load-focus-teacher">${esc(ongoing.teacher)}</div>`
+    : next
+    ? `<div class="load-focus-when">${whenText(next)}</div>
+       <div class="load-focus-subj">${esc(next.subj)}</div>
+       <div class="load-focus-meta">${kindShort(next.type)} · ${fmtDate(next.startDt)}, ${fmtTime(next)}${next.room ? ' · ауд. ' + esc(next.room) : ''}</div>
+       <div class="load-focus-teacher">${esc(next.teacher)}</div>`
+    : `<div class="load-focus-subj">Занятия кончились</div>
+       <div class="load-focus-meta">Семестр пройден полностью.</div>`;
+  const focus = `
+    <div class="card ov-card" style="justify-content:center;">
+      <div class="ov-card-head"><span class="ov-card-ic" aria-hidden="true">${icon('clock', 16)}</span><span class="ov-card-title">Ближайшее занятие</span></div>
+      <div class="load-focus">${focusInner}</div>
+    </div>`;
+
+  // ── Три карточки по типам ──
+  const typeCards = LOAD_TYPES.map(t => {
+    const b = byType[t.key];
+    const p = b.total ? Math.round((b.passed / b.total) * 100) : 0;
+    const nextLine = b.next ? `${whenText(b.next)} · ${fmtDate(b.next.startDt)}` : (b.passed === b.total ? 'всё позади' : '');
+    return `
+      <div class="card load-type">
+        <div class="load-type-head"><span class="load-type-ic" aria-hidden="true">${icon(t.icon, 16)}</span>${t.label}</div>
+        <div class="load-type-nums"><b>${b.passed}</b><span>/ ${b.total} пройдено</span></div>
+        <div class="load-type-bar"><div style="width:${p}%;"></div></div>
+        <div class="load-type-foot">Осталось ${b.total - b.passed}${nextLine ? ' · ' + nextLine : ''}</div>
+      </div>`;
+  }).join('');
+
+  // ── По предметам ──
+  const bySubj = new Map();
+  for (const s of sessions) {
+    let o = bySubj.get(s.subj);
+    if (!o) { o = { subj: s.subj, лаб: [0, 0], пр: [0, 0], лек: [0, 0], next: null }; bySubj.set(s.subj, o); }
+    if (o[s.type]) { o[s.type][1]++; if (isPassed(s)) o[s.type][0]++; }
+    if (!isPassed(s) && !isNow(s) && (!o.next || s.startDt < o.next.startDt)) o.next = s;
+  }
+  const collator = new Intl.Collator('ru');
+  const subjRows = [...bySubj.values()].sort((a, b) => collator.compare(a.subj, b.subj)).map(o => {
+    const cell = (key) => {
+      const [done, tot] = o[key];
+      if (!tot) return `<td class="load-td-num load-td-dim">—</td>`;
+      const full = done >= tot;
+      return `<td class="load-td-num${full ? ' load-td-done' : ''}">${done}<span>/${tot}</span></td>`;
+    };
+    const nextTxt = o.next ? `${fmtDate(o.next.startDt)} · ${kindShort(o.next.type)}` : '—';
+    return `
+      <tr>
+        <td class="load-td-subj">${esc(o.subj)}</td>
+        ${cell('лаб')}${cell('пр')}${cell('лек')}
+        <td class="load-td-next">${nextTxt}</td>
+      </tr>`;
+  }).join('');
+  const subjTable = `
+    <div class="card" style="padding:0;overflow:hidden;">
+      <table class="load-table">
+        <thead><tr>
+          <th style="text-align:left;">Предмет</th><th>Лабы</th><th>Практики</th><th>Лекции</th><th style="text-align:left;">Ближайшее</th>
+        </tr></thead>
+        <tbody>${subjRows}</tbody>
+      </table>
+    </div>`;
+
+  return wrap(`
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;margin-bottom:22px;">
+      <div>
+        <h1 style="font-family:'Onest';font-weight:600;font-size:29px;letter-spacing:-.025em;color:var(--text);margin:0;">Нагрузка</h1>
+        <p style="margin:9px 0 0;font-size:14px;color:var(--text-2);">${esc(meta.group)} · ${meta.subgroup} подгруппа · ${esc(meta.semester)}</p>
+      </div>
+    </div>
+    <div class="load-top">
+      ${hero}
+      ${focus}
+    </div>
+    <div class="load-types">${typeCards}</div>
+    <h2 class="load-h2">По предметам</h2>
+    ${subjTable}`);
 }
 
 // ─── Расписание картинкой ───────────────────────────────────────────────────
@@ -2727,6 +2881,7 @@ const actions = {
   goDashboard: () => setUI({ navTab: 'dashboard', showThemeMenu: false }),
   goSessionsTab: () => setUI({ navTab: 'main', view: 'sessions', showThemeMenu: false }),
   goSchedule: () => setUI({ navTab: 'schedule', showThemeMenu: false }),
+  goLoad: () => setUI({ navTab: 'load', showThemeMenu: false }),
   goToSessions: () => setUI({ view: 'sessions' }),
   toggleThemeMenu: () => setUI({ showThemeMenu: !state.showThemeMenu }),
   closeThemeMenu: () => setUI({ showThemeMenu: false }),
@@ -3323,8 +3478,9 @@ const anyModalOpen = () => !!(state.showAddModal || state.showSessionModal || st
   || state.showLessonModal || state.csvPreview || state.confirmDialog);
 
 setInterval(() => {
-  if (state.navTab !== 'schedule' || state.weekOffset !== 0) return;
   if (anyModalOpen()) return;
+  if (state.navTab === 'load') { render(); return; }
+  if (state.navTab !== 'schedule' || state.weekOffset !== 0) return;
   render();
 }, 30000);
 
