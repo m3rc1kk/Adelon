@@ -1,6 +1,6 @@
 {
   "name": "adelon",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Adelon — трекер выполнения лаб, практик и проектов по предметам семестра",
   "main": "main.js",
   "author": "",
@@ -33,7 +33,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "build/icon.png"
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

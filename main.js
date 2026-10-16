@@ -274,6 +274,67 @@ ipcMain.handle('file:openText', async () => {
   }
 });
 
+// ─── Транспорт к ОГУ через скрытое окно ─────────────────────────────────────
+// Сайт прикрыт антибот-гейтом: он отдаёт заглушку с JS-челленджем, а настоящие
+// данные — только после того, как страница отработала скрипт и получила cookie.
+// Прямой https этого не умеет, поэтому держим невидимое окно: один раз грузим
+// страницу расписания (гейт проходится сам), затем запросы делаем fetch'ем из
+// её контекста. Окно создаём по требованию и закрываем через пару минут покоя,
+// чтобы не висело в фоне зря.
+let oguWin = null;
+let oguReady = null;
+let oguIdleTimer = null;
+
+function scheduleOguClose() {
+  clearTimeout(oguIdleTimer);
+  oguIdleTimer = setTimeout(() => {
+    if (oguWin && !oguWin.isDestroyed()) oguWin.destroy();
+    oguWin = null; oguReady = null;
+  }, 120000);
+}
+
+function ensureOguWindow() {
+  if (oguReady) return oguReady;
+  oguWin = new BrowserWindow({
+    show: false,
+    skipTaskbar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, images: false },
+  });
+  oguWin.on('closed', () => { oguWin = null; oguReady = null; });
+  oguReady = (async () => {
+    await oguWin.loadURL('https://oreluniver.ru/schedule').catch(() => {});
+    const deadline = Date.now() + 40000;
+    // Ждём, пока вместо заглушки прогрузится настоящая страница расписания.
+    while (Date.now() < deadline) {
+      let ok = false;
+      try { ok = await oguWin.webContents.executeJavaScript("typeof scheduleStuds === 'function'"); } catch (_) {}
+      if (ok) return;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error('Не удалось открыть сайт ОГУ (защита от ботов)');
+  })();
+  return oguReady;
+}
+
+async function oguFetchText(pathname) {
+  await ensureOguWindow();
+  scheduleOguClose();
+  const code = `fetch(${JSON.stringify(pathname)}, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function(r){ return r.text(); })`;
+  let body = await oguWin.webContents.executeJavaScript(code);
+  // Изредка после простоя первый запрос ловит гейт — перезагружаем окно и повторяем.
+  if (typeof body !== 'string' || /Пожалуйста, подождите|перенаправлен/i.test(body)) {
+    oguReady = null; if (oguWin && !oguWin.isDestroyed()) oguWin.destroy(); oguWin = null;
+    await ensureOguWindow();
+    body = await oguWin.webContents.executeJavaScript(code);
+    if (typeof body !== 'string' || /Пожалуйста, подождите|перенаправлен/i.test(body)) {
+      throw new Error('Сайт ОГУ вернул защитную страницу');
+    }
+  }
+  return body;
+}
+
+ogu.setTransport(oguFetchText);
+
 const oguHandler = (fn) => async (_e, ...args) => {
   try { return { ok: true, data: await fn(...args) }; }
   catch (err) { return { ok: false, error: String(err && err.message || err) }; }

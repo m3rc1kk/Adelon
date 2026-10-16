@@ -190,6 +190,13 @@ button.ov-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;
 .load-td-done span{color:var(--good);opacity:.6;}
 .load-td-dim{color:var(--text-3);}
 .load-td-next{font-size:12.5px;color:var(--text-2);white-space:nowrap;}
+.load-passed{display:block;}
+.load-sub{display:block;font-size:11px;font-weight:600;margin-top:2px;}
+.load-sub-ok{color:var(--good);}
+.load-sub-behind{color:var(--warn);}
+.load-sub-none{color:var(--text-3);font-weight:400;}
+.load-legend{font-size:12.5px;line-height:1.5;color:var(--text-3);margin:0 0 14px;max-width:760px;}
+.load-legend b{color:var(--text-2);font-weight:600;}
 @media (max-width:860px){
   .load-top{grid-template-columns:1fr;}
   .load-types{grid-template-columns:1fr;}

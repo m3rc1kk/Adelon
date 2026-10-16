@@ -103,7 +103,7 @@ const DEFAULT_THEME = 'warm-dark';
 const state = {
   themeId: DEFAULT_THEME,
   showThemeMenu: false,
-  navTab: 'dashboard',
+  navTab: 'load',
   view: 'sessions',
   currentSessionId: null,
   showAddModal: false,
@@ -577,7 +577,6 @@ function template() {
   <div style="min-height:100vh;background:var(--bg);color:var(--text);font-family:'Golos Text',system-ui,sans-serif;-webkit-font-smoothing:antialiased;" data-theme="${resolveTheme(state.themeId)}">
   <div style="${overrideStyle}">
     ${headerHtml(isMain)}
-    ${state.navTab === 'dashboard' ? dashboardViewHtml() : ''}
     ${isMain && state.view === 'sessions' ? sessionsViewHtml() : ''}
     ${isMain && state.view === 'subjects' ? subjectsViewHtml() : ''}
     ${state.navTab === 'schedule' ? scheduleViewHtml() : ''}
@@ -1063,10 +1062,9 @@ function headerHtml(isMain) {
         <span style="font-family:'Onest';font-weight:600;font-size:19px;letter-spacing:-.02em;color:var(--text);">Adelon</span>
       </div>
       <div style="display:flex;gap:3px;background:var(--surface-2);padding:3px;border-radius:11px;margin-left:8px;">
-        <button class="tab-btn ${state.navTab === 'dashboard' ? 'active' : 'idle'}" data-action="goDashboard">Обзор</button>
+        <button class="tab-btn ${state.navTab === 'load' ? 'active' : 'idle'}" data-action="goLoad">Нагрузка</button>
         <button class="tab-btn ${isMain ? 'active' : 'idle'}" data-action="goSessionsTab">Сессии</button>
         <button class="tab-btn ${state.navTab === 'schedule' ? 'active' : 'idle'}" data-action="goSchedule">Расписание</button>
-        <button class="tab-btn ${state.navTab === 'load' ? 'active' : 'idle'}" data-action="goLoad">Нагрузка</button>
       </div>
       <div style="flex:1;"></div>
       <button class="icon-btn" data-action="openSearchModal" title="Поиск (Ctrl+F)">${icon('search', 17)}</button>
@@ -1985,6 +1983,21 @@ function loadViewHtml() {
   }).join('');
 
   // ── По предметам ──
+  // Связываем расписание с трекером по названию предмета: если в «Сессиях» есть
+  // предмет с тем же именем (например, после импорта CSV), показываем рядом,
+  // сколько работ по нему уже сдано — видно отставание «прошло, но не сдано».
+  const trackMap = {};
+  for (const sess of state.sessions) {
+    for (const su of sess.subjects || []) {
+      const key = csvNorm(su.name);
+      const o = trackMap[key] || (trackMap[key] = { лаб: 0, пр: 0, hasLab: false, hasPr: false });
+      for (const t of su.tasks || []) {
+        if (t.type === 'flask') { o.лаб += taskDone(t); o.hasLab = true; }
+        else if (t.type === 'pen') { o.пр += taskDone(t); o.hasPr = true; }
+      }
+    }
+  }
+
   const bySubj = new Map();
   for (const s of sessions) {
     let o = bySubj.get(s.subj);
@@ -1992,22 +2005,36 @@ function loadViewHtml() {
     if (o[s.type]) { o[s.type][1]++; if (isPassed(s)) o[s.type][0]++; }
     if (!isPassed(s) && !isNow(s) && (!o.next || s.startDt < o.next.startDt)) o.next = s;
   }
+  let linkedAny = false;
   const collator = new Intl.Collator('ru');
   const subjRows = [...bySubj.values()].sort((a, b) => collator.compare(a.subj, b.subj)).map(o => {
-    const cell = (key) => {
-      const [done, tot] = o[key];
+    const track = trackMap[csvNorm(o.subj)];
+    const cell = (key, submittable) => {
+      const [passed, tot] = o[key];
       if (!tot) return `<td class="load-td-num load-td-dim">—</td>`;
-      const full = done >= tot;
-      return `<td class="load-td-num${full ? ' load-td-done' : ''}">${done}<span>/${tot}</span></td>`;
+      if (!submittable) {
+        return `<td class="load-td-num${passed >= tot ? ' load-td-done' : ''}">${passed}<span>/${tot}</span></td>`;
+      }
+      const linked = !!track && (key === 'лаб' ? track.hasLab : track.hasPr);
+      if (linked) linkedAny = true;
+      const subDone = linked ? track[key] : null;
+      const behind = linked && subDone < passed;
+      const sub = linked
+        ? `<span class="load-sub ${behind ? 'load-sub-behind' : 'load-sub-ok'}">сдано ${subDone}</span>`
+        : `<span class="load-sub load-sub-none">—</span>`;
+      return `<td class="load-td-num"><span class="load-passed">${passed}<span>/${tot}</span></span>${sub}</td>`;
     };
     const nextTxt = o.next ? `${fmtDate(o.next.startDt)} · ${kindShort(o.next.type)}` : '—';
     return `
       <tr>
         <td class="load-td-subj">${esc(o.subj)}</td>
-        ${cell('лаб')}${cell('пр')}${cell('лек')}
+        ${cell('лаб', true)}${cell('пр', true)}${cell('лек', false)}
         <td class="load-td-next">${nextTxt}</td>
       </tr>`;
   }).join('');
+  const hint = linkedAny
+    ? `<p class="load-legend">В ячейках лаб и практик: сверху — сколько занятий <b>прошло</b> по расписанию, снизу — сколько работ <b>сдано</b> (из предмета с тем же названием в «Сессиях»). Жёлтым — где сдано меньше, чем прошло.</p>`
+    : `<p class="load-legend">Добавь предметы с такими же названиями в «Сессиях» (проще всего импортом CSV) — и здесь рядом появится, сколько работ сдано.</p>`;
   const subjTable = `
     <div class="card" style="padding:0;overflow:hidden;">
       <table class="load-table">
@@ -2031,6 +2058,7 @@ function loadViewHtml() {
     </div>
     <div class="load-types">${typeCards}</div>
     <h2 class="load-h2">По предметам</h2>
+    ${hint}
     ${subjTable}`);
 }
 
@@ -2878,7 +2906,6 @@ function noticeToastHtml() {
 }
 
 const actions = {
-  goDashboard: () => setUI({ navTab: 'dashboard', showThemeMenu: false }),
   goSessionsTab: () => setUI({ navTab: 'main', view: 'sessions', showThemeMenu: false }),
   goSchedule: () => setUI({ navTab: 'schedule', showThemeMenu: false }),
   goLoad: () => setUI({ navTab: 'load', showThemeMenu: false }),

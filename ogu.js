@@ -1,32 +1,20 @@
 'use strict';
 
-const https = require('https');
+// Транспорт внедряет main.js: прямой https не проходит антибот-защиту ОГУ,
+// поэтому запросы идут через скрытое окно, где отработал JS-гейт. Здесь —
+// только построение адресов и разбор ответов.
+let transport = null;
+function setTransport(fn) { transport = fn; }
 
-const HOST = 'oreluniver.ru';
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-  'Accept': '*/*',
-  'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
-  'Referer': 'https://oreluniver.ru/schedule',
-  'X-Requested-With': 'XMLHttpRequest',
-};
-
-function httpGet(pathname) {
-  return new Promise((resolve, reject) => {
-    const req = https.get({ host: HOST, path: pathname, headers: HEADERS, timeout: 20000 }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => req.destroy(new Error('Превышено время ожидания ответа сайта ОГУ')));
-  });
+async function getText(pathname) {
+  if (!transport) throw new Error('ОГУ: транспорт не настроен');
+  return transport(pathname);
 }
 
 async function getJson(pathname) {
-  const r = await httpGet(pathname);
-  if (r.status !== 200) throw new Error('Сайт ОГУ ответил HTTP ' + r.status);
-  return JSON.parse(r.body.toString('utf8'));
+  const body = await getText(pathname);
+  try { return JSON.parse(body); }
+  catch (_) { throw new Error('Сайт ОГУ вернул неожиданный ответ'); }
 }
 
 function unescapeIcs(s) {
@@ -86,9 +74,8 @@ const courses = (div) => getJson(`/schedule/${encodeURIComponent(div)}/kurslist`
 const groups = (div, kurs) => getJson(`/schedule/${encodeURIComponent(div)}/${encodeURIComponent(kurs)}/grouplist`);
 
 async function schedule(group) {
-  const r = await httpGet(`/schedule//${encodeURIComponent(group)}////printschedule/ics?current`);
-  if (r.status !== 200) throw new Error('Сайт ОГУ ответил HTTP ' + r.status);
-  return parseIcs(r.body.toString('utf8'));
+  const body = await getText(`/schedule//${encodeURIComponent(group)}////printschedule/ics?current`);
+  return parseIcs(body);
 }
 
-module.exports = { divisions, courses, groups, schedule, parseIcs };
+module.exports = { divisions, courses, groups, schedule, parseIcs, setTransport };
